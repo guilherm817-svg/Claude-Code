@@ -1,0 +1,6 @@
+anthropic>=1.11
+faster-whisper>=1.2
+streamlit>=1.50
+pandas>=2.0
+pydantic>=2.7
+python-dotenv>=1.0

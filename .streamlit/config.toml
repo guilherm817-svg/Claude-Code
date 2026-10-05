@@ -1,0 +1,10 @@
+[server]
+# Tamanho máximo (MB) de cada arquivo enviado pela aba "Enviar arquivos".
+# Para cursos grandes, prefira a aba "Pasta do computador", que lê os vídeos sem copiar.
+maxUploadSize = 2048
+
+[browser]
+gatherUsageStats = false
+
+[client]
+toolbarMode = "minimal"

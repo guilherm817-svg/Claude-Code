@@ -1,0 +1,9 @@
+# Ambiente Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Dados locais: suas aulas processadas e sua chave de API
+biblioteca/
+.env
