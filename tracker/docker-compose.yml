@@ -1,0 +1,46 @@
+# Servidor próprio (VPS) com HTTPS automático:
+#   1. aponte o domínio (registro A) para o IP do servidor;
+#   2. crie um arquivo .env com DOMINIO=rastro.suaempresa.com.br e SENHA_BANCO=uma-senha-forte;
+#   3. docker compose up -d
+services:
+  banco:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: rastro
+      POSTGRES_USER: rastro
+      POSTGRES_PASSWORD: ${SENHA_BANCO:?defina SENHA_BANCO no .env}
+    volumes:
+      - banco:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rastro"]
+      interval: 5s
+      retries: 10
+
+  rastro:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      banco:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://rastro:${SENHA_BANCO}@banco:5432/rastro
+      RASTRO_URL_PUBLICA: https://${DOMINIO:?defina DOMINIO no .env}
+    volumes:
+      - dados:/dados
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on: [rastro]
+    command: caddy reverse-proxy --from ${DOMINIO} --to rastro:8000
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - caddy:/data
+
+volumes:
+  banco:
+  dados:
+  caddy:

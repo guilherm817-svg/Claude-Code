@@ -1,5 +1,8 @@
 # 🎓 Analisador de Aulas
 
+> Este repositório também tem o **Rastro**, um tracker de vendas por anúncio (estilo Utmify), na pasta
+> [`tracker/`](tracker/README.md).
+
 App local para estudar aulas longas (1 hora ou mais) de cursos que você comprou. Você aponta a pasta com
 os vídeos e o app:
 
