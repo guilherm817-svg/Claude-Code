@@ -11,19 +11,19 @@ cobre dezenas de milhares de visitas diárias.
 
 1. Clique no botão. Entre (ou crie uma conta) na Cloudflare e conecte o GitHub quando ele pedir.
 2. A Cloudflare copia esta pasta para um repositório seu, cria o banco D1 sozinha e publica o Worker.
-3. No fim aparece o endereço, parecido com `https://vsl-analytics.SEU-NOME.workers.dev`.
+3. No fim aparece o endereço, parecido com `https://claude-code.SEU-NOME.workers.dev`.
 4. No player, use esse endereço com `/vsl` no final:
 
 ```html
 <div class="vsl-player" data-src="..." data-pitch="12:30"
-     data-analytics="https://vsl-analytics.SEU-NOME.workers.dev/vsl"></div>
+     data-analytics="https://claude-code.SEU-NOME.workers.dev/vsl"></div>
 ```
 
 O painel abre no mesmo endereço, sem o `/vsl`.
 
 ### Proteger o painel com senha (recomendado)
 
-No site da Cloudflare: **Workers & Pages → vsl-analytics → Settings → Variables and Secrets → Add**, tipo
+No site da Cloudflare: **Workers & Pages → claude-code → Settings → Variables and Secrets → Add**, tipo
 *Secret*, nome `TOKEN`, valor uma senha longa. Clique em *Deploy*. A partir daí o painel pede essa senha; os
 envios do player continuam abertos. A variável `FUSO` (padrão `America/Sao_Paulo`) define o fuso das datas.
 

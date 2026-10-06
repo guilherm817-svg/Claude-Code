@@ -2,7 +2,7 @@
 // O banco D1 é criado automaticamente no primeiro deploy (botão "Deploy to Cloudflare" ou `npm run deploy`).
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "vsl-analytics",
+  "name": "claude-code",
   "main": "src/index.js",
   "compatibility_date": "2026-09-01",
   // Arquivos .html são importados como texto pela regra padrão do wrangler (é assim que o painel entra no bundle).
