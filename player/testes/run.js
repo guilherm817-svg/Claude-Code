@@ -270,6 +270,34 @@ async function waitTime(page, t, timeout = 15000) {
     await page.screenshot({ path: path.join(CAPTURAS, '07-mobile-paused.png') });
     await ctx4.close();
 
+    // ---------------------------------------------------------------- H. modo de revisão
+    console.log('\nH. Modo de revisão (só com a chave)');
+    const ctx5 = await browser.newContext({ viewport: { width: 1000, height: 800 } });
+    page = await ctx5.newPage();
+    page.on('pageerror', (e) => { failures++; console.log('  PAGEERROR', e.message); });
+    await page.goto(BASE + '/t1.html?revisar=errada');
+    await waitState(page, 'autoplaying');
+    check((await page.$('#vsl-teste .vsl-review')) === null, 'chave errada não mostra a barra');
+    check(await page.evaluate(() => document.querySelector('link[rel="preconnect"]') === null), 'sem preconnect para vídeo da mesma origem');
+    await page.goto(BASE + '/t1.html?revisar=chave-secreta');
+    await waitState(page, 'autoplaying');
+    check((await page.$('#vsl-teste .vsl-review')) !== null, 'chave certa mostra a barra de revisão');
+    await page.click('#vsl-teste [data-vsl-speed="2"]');
+    await sleep(300);
+    check((await vid(page, 'v.playbackRate')) === 2, 'velocidade 2x fica valendo');
+    check((await state(page)) === 'autoplaying', 'clicar na barra não pausa nem tira o overlay');
+    await page.fill('#vsl-teste [data-vsl-goto]', '0:20');
+    await page.click('#vsl-teste [data-vsl-go]');
+    await waitState(page, 'playing');
+    await sleep(600);
+    const pulou = await vid(page, 'v.currentTime');
+    check(pulou >= 19 && pulou < 25, 'pular para 0:20 funciona e toca com som', pulou);
+    check(await vid(page, 'v.muted') === false, 'depois do pulo o vídeo está com som');
+    await page.goto(BASE + '/t1.html');
+    await waitState(page, 'autoplaying');
+    check((await page.$('#vsl-teste .vsl-review')) !== null, 'o modo continua na mesma aba sem repetir a chave na URL');
+    await ctx5.close();
+
     await browser.close();
   } catch (e) {
     failures++;

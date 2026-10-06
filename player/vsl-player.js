@@ -21,7 +21,7 @@
   const EVENTS = [
     'ready', 'autoplay', 'autoplay_blocked', 'unmute', 'play', 'pause', 'ended', 'replay',
     'progress', 'milestone', 'pitch', 'reach', 'resume_prompt', 'resume_continue', 'resume_restart',
-    'seek_blocked', 'fullscreen', 'state', 'error',
+    'seek_blocked', 'fullscreen', 'review', 'state', 'error',
   ];
 
   const DEFAULTS = {
@@ -46,6 +46,7 @@
     pitch: '',                // segundos (ou mm:ss) em que a oferta começa; dispara "pitch" uma vez
     analytics: '',            // URL que recebe os eventos e a retenção (POST, JSON)
     analyticsInterval: 15,    // segundos entre os envios
+    reviewKey: '',            // chave do modo de revisão: abra a página com ?revisar=CHAVE para acelerar e pular
     texts: {
       unmuteTitle: 'Seu vídeo já começou',
       unmuteSubtitle: 'Clique para ouvir',
@@ -58,6 +59,8 @@
       resumeRestart: 'Começar do início',
       error: 'Não foi possível carregar o vídeo.',
       fullscreen: 'Tela cheia',
+      review: 'Modo de revisão',
+      reviewGo: 'Ir',
     },
   };
 
@@ -66,7 +69,8 @@
     unmuteTitle: 'unmute-title', unmuteSubtitle: 'unmute-subtitle', play: 'play-text',
     pause: 'pause-text', replay: 'replay-text', resumeTitle: 'resume-title',
     resumeSubtitle: 'resume-subtitle', resumeContinue: 'resume-continue',
-    resumeRestart: 'resume-restart', error: 'error-text', fullscreen: 'fullscreen-label',
+    resumeRestart: 'resume-restart', error: 'error-text', fullscreen: 'fullscreen-label', review: 'review-text',
+    reviewGo: 'review-go',
   };
 
   const ICONS = {
@@ -307,6 +311,53 @@
       this._bindElements();
       this._attachSource();
       this._boot();
+      if (this._modoRevisaoPedido()) this._ativarRevisao();
+    }
+
+    // -- modo de revisão (só para quem tem a chave) --------------------------
+
+    _modoRevisaoPedido() {
+      const chave = String(this.opts.reviewKey || '');
+      if (!chave) return false;
+      let pedido = '';
+      try { pedido = new URLSearchParams(global.location.search).get('revisar') || ''; } catch (e) { pedido = ''; }
+      if (!pedido) { try { pedido = global.sessionStorage.getItem('vsl:revisar') || ''; } catch (e) { pedido = ''; } }
+      if (pedido !== chave) return false;
+      try { global.sessionStorage.setItem('vsl:revisar', chave); } catch (e) { /* ignora */ }
+      return true;
+    }
+
+    _ativarRevisao() {
+      if (this.review) return;
+      this.opts.lockSpeed = false;
+      this.opts.lockSeek = false;
+      const t = this.opts.texts;
+      const barra = document.createElement('div');
+      barra.className = 'vsl-review';
+      barra.innerHTML =
+        '<span class="vsl-review-titulo">' + esc(t.review) + '</span>' +
+        [1, 1.5, 2, 3].map((v) => '<button type="button" data-vsl-speed="' + v + '"' + (v === 1 ? ' class="vsl-on"' : '') + '>' + v + 'x</button>').join('') +
+        '<input type="text" data-vsl-goto placeholder="mm:ss" size="6" aria-label="Ir para">' +
+        '<button type="button" data-vsl-go>' + esc(t.reviewGo) + '</button>';
+      this.root.appendChild(barra);
+      this.review = barra;
+      const parar = (e) => e.stopPropagation();
+      ['click', 'pointerdown', 'keydown'].forEach((tipo) => barra.addEventListener(tipo, parar));
+      barra.querySelectorAll('[data-vsl-speed]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          this.video.playbackRate = parseFloat(btn.getAttribute('data-vsl-speed'));
+          barra.querySelectorAll('[data-vsl-speed]').forEach((b) => b.classList.toggle('vsl-on', b === btn));
+        });
+      });
+      const campo = barra.querySelector('[data-vsl-goto]');
+      const ir = () => {
+        const alvo = parseTime(campo.value);
+        if (alvo == null) return;
+        if (!this.unmuted) this._playWithSound(alvo); else { this._seek(alvo); this._play(); }
+      };
+      barra.querySelector('[data-vsl-go]').addEventListener('click', ir);
+      campo.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); ir(); } });
+      this.emit('review', {});
     }
 
     // -- montagem ------------------------------------------------------------
@@ -362,15 +413,29 @@
       }
     }
 
+    _preconectar(src) {
+      let origem = '';
+      try { origem = new URL(src, global.location.href).origin; } catch (e) { return; }
+      if (!origem || origem === global.location.origin || VSLPlayer._preconectados[origem]) return;
+      VSLPlayer._preconectados[origem] = true;
+      const link = document.createElement('link');
+      link.rel = 'preconnect';
+      link.href = origem;
+      link.crossOrigin = 'anonymous';
+      (document.head || document.documentElement).appendChild(link);
+    }
+
     _attachSource() {
       const v = this.video;
       const src = this.opts.src;
+      this._preconectar(src);
       const isHls = /\.m3u8(\?|#|$)/i.test(src);
       if (!isHls) { v.src = src; return; }
       if (v.canPlayType('application/vnd.apple.mpegurl')) { v.src = src; return; }
       const Hls = global.Hls;
       if (Hls && Hls.isSupported()) {
-        this.hls = new Hls();
+        // startLevel 0: o vídeo começa na hora, na qualidade mais leve, e sobe assim que a conexão permite.
+        this.hls = new Hls(Object.assign({ startLevel: 0, capLevelToPlayerSize: true, maxBufferLength: 60 }, this.opts.hlsConfig || {}));
         this.hls.on(Hls.Events.ERROR, (_, data) => { if (data && data.fatal) this._onError(data.type); });
         this.hls.loadSource(src);
         this.hls.attachMedia(v);
@@ -726,6 +791,7 @@
   VSLPlayer.events = EVENTS.slice();
   VSLPlayer.instances = [];
   VSLPlayer.byId = {};
+  VSLPlayer._preconectados = {};
   VSLPlayer.parseTime = parseTime;
   VSLPlayer.create = (el, options) => new VSLPlayer(el, options);
   VSLPlayer.get = (id) => VSLPlayer.byId[id] || null;

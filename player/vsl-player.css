@@ -291,6 +291,40 @@
 
 .vsl-player:fullscreen .vsl-video { object-fit: contain; }
 
+/* Modo de revisão (só com ?revisar=CHAVE): velocidade e pulo para quem é dono da página */
+.vsl-player .vsl-review {
+  position: absolute;
+  left: 10px;
+  bottom: calc(var(--vsl-progress-height) + 10px);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.7);
+  color: #fff;
+  font-size: 12px;
+  z-index: 7;
+  cursor: default;
+}
+
+.vsl-player .vsl-review-titulo { opacity: 0.8; margin-right: 4px; }
+
+.vsl-player .vsl-review button,
+.vsl-player .vsl-review input {
+  font: inherit;
+  font-size: 12px;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 6px;
+  padding: 3px 7px;
+  cursor: pointer;
+}
+
+.vsl-player .vsl-review input { width: 60px; cursor: text; }
+.vsl-player .vsl-review button.vsl-on { background: var(--vsl-color); border-color: var(--vsl-color); }
+
 /* Elementos da página com delay: ficam escondidos até o vídeo chegar no tempo */
 [data-vsl-show-at]:not(.vsl-visible) { display: none !important; }
 [data-vsl-hide-at].vsl-hidden { display: none !important; }

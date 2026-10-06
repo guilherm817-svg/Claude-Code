@@ -99,6 +99,7 @@ Todas vão como `data-...` no `div` (ou como objeto em `VSLPlayer.create(el, { .
 | `data-fallback` | | MP4 usado se o navegador não tocar o `.m3u8`. |
 | `data-analytics` | | URL que recebe os eventos e a retenção (veja abaixo). |
 | `data-analytics-interval` | `15` | Segundos entre os envios. |
+| `data-review-key` | | Chave do modo de revisão: abrindo a página com `?revisar=CHAVE`, aparece uma barra para acelerar (até 3x) e pular para um minuto. Só para você conferir a página; o visitante continua sem controles. |
 
 ### Textos
 
@@ -268,6 +269,19 @@ player.on('milestone', ({ percent }) => ...);
 VSLPlayer.instances;     // todos os players da página
 VSLPlayer.init();        // inicia divs adicionados depois do carregamento
 ```
+
+## Carregamento rápido
+
+O vídeo começa a baixar no instante em que a página abre (`preload="auto"` e autoplay mudo), então quando o
+visitante olha, já está tocando. Além disso:
+
+- o player abre a conexão com a CDN do vídeo antes do primeiro byte (`preconnect`);
+- com HLS, começa pela qualidade mais leve para o primeiro quadro aparecer na hora e sobe de qualidade
+  conforme a conexão permite, sem baixar 1080p para um player pequeno no celular;
+- para MP4, exporte com `faststart` (veja abaixo) para não precisar baixar o arquivo inteiro antes de começar.
+
+Para ganhar mais alguns décimos de segundo, coloque o bloco do player no começo da página e, se o vídeo
+estiver em outro domínio, adicione antes dele: `<link rel="preconnect" href="https://sua-cdn.com">`.
 
 ## HLS (`.m3u8`)
 
