@@ -24,6 +24,29 @@ Abra `index.html` para ver a demonstração.
 
 ## Instalação
 
+### Sem hospedar nada (CDN)
+
+Este repositório é público, então o CDN gratuito jsDelivr serve os arquivos direto do GitHub. Cole este
+bloco num elemento de **HTML personalizado** da sua página (Atomicat, Elementor, WordPress, Framer...):
+
+```html
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/guilherm817-svg/Claude-Code@f8381a0cab1124a65b2d0b50196784c41ce66235/player/vsl-player.css">
+
+<div class="vsl-player"
+     data-id="vsl-principal"
+     data-src="https://seu-cdn.com/vsl.mp4"
+     data-poster="https://seu-cdn.com/capa.jpg"
+     data-color="#e11d48"
+     data-pitch="12:30"></div>
+
+<script src="https://cdn.jsdelivr.net/gh/guilherm817-svg/Claude-Code@f8381a0cab1124a65b2d0b50196784c41ce66235/player/vsl-player.js"></script>
+```
+
+O endereço está preso a uma versão específica (o código depois do `@`), então ele nunca muda debaixo de você.
+Para pegar uma versão nova, troque esse código pelo da versão desejada.
+
+### Com os arquivos no seu site
+
 Copie `vsl-player.js` e `vsl-player.css` para o seu site e cole na página:
 
 ```html
