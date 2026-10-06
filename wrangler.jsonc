@@ -1,0 +1,14 @@
+// Deploy do analytics do VSL Player a partir da raiz do repositório (é o que a Cloudflare usa por padrão).
+// O código fica em player/analytics/cloudflare; esta configuração só aponta para lá.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "claude-code",
+  "main": "player/analytics/cloudflare/src/index.js",
+  "compatibility_date": "2026-09-01",
+  "vars": { "FUSO": "America/Sao_Paulo" },
+  "keep_vars": true,
+  "d1_databases": [
+    { "binding": "DB", "database_name": "vsl-analytics", "migrations_dir": "player/analytics/cloudflare/migrations" }
+  ],
+  "observability": { "enabled": true }
+}

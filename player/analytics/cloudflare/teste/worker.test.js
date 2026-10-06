@@ -260,6 +260,24 @@ test('sem TOKEN configurado o painel e a API ficam abertos', async () => {
   assert.equal((await (await pedir('GET', '/api/config')).json()).token, false);
 });
 
+test('o esquema é criado sozinho na primeira requisição quando a migração não rodou', async () => {
+  const fs = await import('node:fs');
+  const { DatabaseSync } = await import('node:sqlite');
+  const esquema = fs.readFileSync(new URL('../migrations/0001_inicial.sql', import.meta.url), 'utf8');
+  const bruto = new DatabaseSync(':memory:'); // sem tabela nenhuma
+  const db = {
+    prepare(sql) { const st = bruto.prepare(sql); const stmt = { args: [], bind(...a) { stmt.args = a.map((x) => (x === undefined ? null : x)); return stmt; },
+      async first() { const r = st.get(...stmt.args); return r == null ? null : { ...r }; }, async all() { return { results: st.all(...stmt.args).map((r) => ({ ...r })) }; },
+      async run() { st.run(...stmt.args); return { success: true }; } }; return stmt; },
+    async exec(sql) { bruto.exec(sql); },
+  };
+  const a = criarApp({ painel: '<p>painel</p>', esquema });
+  const env = { DB: db, TOKEN: '', FUSO };
+  const r = await a.fetch(new Request('http://x/vsl', { method: 'POST', body: JSON.stringify(envio()) }), env);
+  assert.equal(r.status, 204);
+  assert.equal((await (await a.fetch(new Request('http://x/api/resumo'), env)).json()).sessoes, 1);
+});
+
 test('o painel do Worker é o mesmo arquivo do servidor Python', async () => {
   const fs = await import('node:fs');
   const aqui = fs.readFileSync(new URL('../painel.html', import.meta.url), 'utf8');

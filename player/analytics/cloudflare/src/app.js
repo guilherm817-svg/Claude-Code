@@ -451,8 +451,17 @@ function autorizado(request, url, token) {
   return iguais(enviado, token);
 }
 
-/** Cria o app. `painel` é o HTML do painel; `env` traz DB (D1), TOKEN e FUSO. */
-export function criarApp({ painel }) {
+/** Cria o app. `painel` é o HTML do painel; `esquema` é o SQL da migração; `env` traz DB (D1), TOKEN e FUSO. */
+export function criarApp({ painel, esquema = '' }) {
+  // O esquema é garantido na primeira requisição de cada instância (CREATE TABLE IF NOT EXISTS é barato),
+  // para o Worker funcionar mesmo quando a migração não rodou no deploy.
+  let esquemaPronto = null;
+  const garantirEsquema = (db) => {
+    if (!esquema || !db || typeof db.exec !== 'function') return Promise.resolve();
+    if (!esquemaPronto) esquemaPronto = db.exec(esquema).catch((erro) => { esquemaPronto = null; throw erro; });
+    return esquemaPronto;
+  };
+
   async function post(request, env, url) {
     const caminho = url.pathname.replace(/\/+$/, '') || '/';
     if (!CAMINHOS_COLETA.has(caminho)) return resposta(404, 'nao encontrado', { cors: true });
@@ -504,6 +513,7 @@ export function criarApp({ painel }) {
       const url = new URL(request.url);
       try {
         if (request.method === 'OPTIONS') return resposta(204, null, { cors: true });
+        await garantirEsquema(env.DB);
         if (request.method === 'POST') return await post(request, env, url);
         if (request.method === 'GET') return await get(request, env, url);
         if (request.method === 'HEAD') {

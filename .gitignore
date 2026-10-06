@@ -17,3 +17,7 @@ player/testes/capturas/
 player/testes/node_modules/
 player/analytics/dados.sqlite*
 player/testes/e2e.html
+
+# Node (deploy do analytics na Cloudflare)
+node_modules/
+.wrangler/

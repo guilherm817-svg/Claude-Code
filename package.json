@@ -1,0 +1,12 @@
+{
+  "name": "claude-code",
+  "private": true,
+  "description": "Deploy do analytics do VSL Player (player/analytics/cloudflare) a partir da raiz do repositório",
+  "scripts": {
+    "deploy": "wrangler deploy && wrangler d1 migrations apply DB --remote",
+    "test": "cd player/analytics/cloudflare && node --test teste/worker.test.js"
+  },
+  "devDependencies": {
+    "wrangler": "^4.147.0"
+  }
+}
