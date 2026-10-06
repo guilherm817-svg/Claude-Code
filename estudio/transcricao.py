@@ -17,7 +17,7 @@ from pathlib import Path
 
 from . import config
 from .midia import ler_audio
-from .projetos import Estudio, Palavra, ProjetoNaoEncontrado, novo_id
+from .projetos import MAX_LETRAS, Estudio, Palavra, ProjetoNaoEncontrado, novo_id
 
 log = logging.getLogger(__name__)
 
@@ -124,7 +124,7 @@ def ajustar_palavras(palavras: list[dict], duracao: float) -> list[Palavra]:
     """As palavras no formato que o projeto aceita: dentro do clipe, em ordem e cada uma com alguma duração."""
     ajustadas = []
     for p in sorted(palavras, key=lambda p: p["inicio"]):
-        texto = " ".join(p["texto"].split())[:80]
+        texto = " ".join(p["texto"].split())[:MAX_LETRAS]
         inicio = min(max(p["inicio"], 0.0), duracao)
         fim = min(max(p["fim"], inicio), duracao)
         if fim - inicio < 0.01:  # o Whisper às vezes devolve palavra sem duração, quase sempre a última

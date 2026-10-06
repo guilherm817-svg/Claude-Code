@@ -398,6 +398,19 @@ def test_api_transcreve_em_segundo_plano(cliente, clipes, whisper):
     assert cliente.get("/api/legendas/naoexiste").status_code == 404
 
 
+def test_api_recusa_legenda_ruim_em_portugues(cliente, clipes):
+    pid = cliente.post("/api/projetos", json={}, headers=CABECALHO).json()["id"]
+    midia = _subir(cliente, pid, clipes["falado"])
+    projeto = cliente.get(f"/api/projetos/{pid}").json()
+    base = {k: projeto[k] for k in ("nome", "linha")}
+    for palavra, mensagem in (({"inicio": 0, "fim": 1, "texto": " "}, "Uma palavra da legenda está vazia."),
+                              ({"inicio": 0, "fim": 1, "texto": "x" * 81}, "Uma palavra da legenda passou de 80 letras.")):
+        r = cliente.put(f"/api/projetos/{pid}", json={**base, "legendas": {midia["id"]: [palavra]}}, headers=CABECALHO)
+        assert r.status_code == 422 and [d["msg"] for d in r.json()["detail"]] == [mensagem]
+    r = cliente.put(f"/api/projetos/{pid}", json={**base, "legendas": {"e" * 12: []}}, headers=CABECALHO)
+    assert r.status_code == 400 and "não está no projeto" in r.json()["detail"]
+
+
 def test_api_explica_quando_o_modelo_nao_baixa(cliente, clipes, monkeypatch):
     def sem_internet(modelo, dispositivo):
         raise transcricao.ErroTranscricao(transcricao._sem_internet(modelo))

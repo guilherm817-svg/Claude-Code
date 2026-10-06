@@ -19,6 +19,7 @@ const POSICOES = [['alto', 'Acima', 'Na parte de cima do vídeo'], ['centro', 'C
 const IDIOMAS = [['auto', 'Detectar sozinho'], ['pt', 'Português'], ['en', 'Inglês'], ['es', 'Espanhol']];
 const IDIOMA_DO_TEXTO = { auto: 'pt-BR', pt: 'pt-BR', en: 'en', es: 'es' };
 const SOBREPOSICAO_MINIMA = 0.02; // igual à do algoritmo: palavra que mal encosta no corte fica de fora
+const MAX_LETRAS = 80; // por palavra, o mesmo limite do servidor
 const AMOSTRA = [{ inicio: 0, fim: 0.3, texto: 'Isso' }, { inicio: 0.3, fim: 0.6, texto: 'muda' }, { inicio: 0.6, fim: 0.9, texto: 'tudo' }];
 
 const ativo = (trabalho) => trabalho && (trabalho.estado === 'na_fila' || trabalho.estado === 'transcrevendo');
@@ -144,9 +145,12 @@ export class Legendas {
         if (!id) break;
         const atualizado = await api.transcricao(id);
         if (this.trabalho?.id !== id) continue; // outro trabalho tomou o lugar enquanto esperava
+        const anterior = this.trabalho;
         this.trabalho = atualizado;
-        this._aplicar(atualizado);
-        this.app.atualizar();
+        // Redesenhar o painel a cada consulta fecharia uma lista aberta nele: só quando algo mudou de verdade.
+        if (this._aplicar(atualizado) || anterior.estado !== atualizado.estado
+          || anterior.pendentes.join() !== atualizado.pendentes.join()) this.app.atualizar();
+        else this._mostrarAndamento();
       }
     } catch (erro) {
       avisar(`Não consegui acompanhar a transcrição: ${erro.message}`, 'erro', 8000);
@@ -160,11 +164,20 @@ export class Legendas {
     else if (fim.estado === 'pronta' && fim.concluidas.length) avisar('Legendas prontas. Para corrigir uma palavra, clique no clipe e edite o texto no painel da direita.');
   }
 
-  // As transcrições chegam sem passar pelo desfazer: são dados novos, não uma edição.
+  // As transcrições chegam sem passar pelo desfazer: são dados novos, não uma edição. Devolve quantas chegaram.
   _aplicar(trabalho) {
-    if (trabalho.projeto_id !== this.app.projeto().id) return;
-    for (const midiaId of trabalho.concluidas.slice(this.aplicadas)) this.app.mesclar(midiaId, trabalho.resultados[midiaId]);
+    if (trabalho.projeto_id !== this.app.projeto().id) return 0;
+    const novas = trabalho.concluidas.slice(this.aplicadas);
+    for (const midiaId of novas) this.app.mesclar(midiaId, trabalho.resultados[midiaId]);
     this.aplicadas = trabalho.concluidas.length;
+    return novas.length;
+  }
+
+  _mostrarAndamento() {
+    for (const caixa of document.querySelectorAll('.andamento-legendas')) {
+      caixa.querySelector('.barra span').style.width = `${Math.round(this.trabalho.progresso * 100)}%`;
+      caixa.querySelector('p').textContent = this.trabalho.etapa;
+    }
   }
 
   // Painel do projeto
@@ -202,7 +215,8 @@ export class Legendas {
         el('span', {}, el('strong', {}, 'Animação ao aparecer'), el('small', {}, 'Cada tela de legenda entra com um pulinho.'))),
       el('label', { class: 'campo' }, el('span', { class: 'rotulo' }, 'Idioma da fala'),
         el('select', { onchange: (e) => this.app.editar((proj) => { proj.idioma_legenda = e.target.value; }) },
-          ...IDIOMAS.map(([valor, nome]) => el('option', { value: valor, selected: valor === p.idioma_legenda }, nome)))),
+          ...IDIOMAS.map(([valor, nome]) => el('option', { value: valor, selected: valor === p.idioma_legenda }, nome))),
+        el('small', { class: 'nota' }, 'Vale para as próximas transcrições. Para refazer as que já existem, use o botão abaixo.')),
       el('button', {
         class: 'botao', disabled: ativo(this.trabalho) || !p.midias.length, title: 'Útil depois de trocar o idioma',
         onclick: () => {
@@ -219,6 +233,11 @@ export class Legendas {
 
   _andamento() {
     const t = this.trabalho;
+    if (t?.estado === 'erro' && t.projeto_id === this.app.projeto().id) {
+      return el('div', { class: 'aviso erro-legendas', role: 'alert' }, icone('alerta', 14),
+        el('div', {}, el('span', {}, t.erro),
+          el('button', { class: 'botao pequeno', onclick: () => this.transcrever(null, false) }, 'Tentar de novo')));
+    }
     if (!ativo(t)) return null;
     return el('div', { class: 'andamento-legendas', role: 'status' },
       el('div', { class: 'barra' }, el('span', { style: { width: `${Math.round(t.progresso * 100)}%` } })),
@@ -318,7 +337,10 @@ export class Legendas {
     if (!midia) return;
     const { antes, dentro, depois } = separar(item, p.legendas[midia.id] || []);
     const novas = realinhar(dentro, texto, [item.entrada, item.saida])
-      .map((w) => ({ ...w, inicio: Math.max(0, w.inicio), fim: Math.min(midia.duracao, w.fim) }))
+      .map((w) => ({
+        texto: [...w.texto].slice(0, MAX_LETRAS).join(''), // o servidor não aceita "palavra" maior (um link colado)
+        inicio: Math.max(0, w.inicio), fim: Math.min(midia.duracao, w.fim),
+      }))
       .filter((w) => w.fim - w.inicio > 0.0005);
     p.legendas = { ...p.legendas, [midia.id]: [...antes, ...novas, ...depois].sort((a, b) => a.inicio - b.inicio) };
     this.app.redesenhar();

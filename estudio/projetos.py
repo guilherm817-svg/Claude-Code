@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import BinaryIO, Literal
 
 from pydantic import BaseModel, Field, field_validator
+from pydantic_core import PydanticCustomError
 
 from . import config
 from .midia import ErroMidia, analisar, gerar_tira
@@ -25,6 +26,7 @@ from .midia import ErroMidia, analisar, gerar_tira
 PADRAO_ID = r"^[0-9a-f]{12}$"
 DURACAO_MINIMA = 0.1  # s: o menor trecho que a linha do tempo aceita
 MAX_PALAVRAS = 5000  # por clipe: muito mais do que cabe num clipe de IA
+MAX_LETRAS = 80  # por palavra
 TOLERANCIA_LEGENDA = 0.5  # s: o Whisper às vezes marca a última palavra um pouco depois do fim do clipe
 
 Formato = Literal["reels", "feed", "quadrado", "youtube"]
@@ -111,14 +113,17 @@ class Palavra(BaseModel):
     """Uma palavra da legenda, com o tempo dela em segundos do arquivo da mídia."""
     inicio: float
     fim: float
-    texto: str = Field(min_length=1, max_length=80)
+    texto: str
 
     @field_validator("texto")
     @classmethod
     def _texto(cls, valor: str) -> str:
+        # PydanticCustomError: a mensagem chega à tela sem o "Value error," em inglês na frente.
         valor = " ".join(unicodedata.normalize("NFC", valor).split())
         if not valor:
-            raise ValueError("Uma palavra da legenda está vazia.")
+            raise PydanticCustomError("palavra_vazia", "Uma palavra da legenda está vazia.")
+        if len(valor) > MAX_LETRAS:
+            raise PydanticCustomError("palavra_longa", "Uma palavra da legenda passou de 80 letras.")
         return valor
 
 

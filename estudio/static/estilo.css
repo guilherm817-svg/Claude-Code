@@ -323,6 +323,7 @@ small.nota { display: block; margin-top: 6px; }
 .segmentado button:hover { color: var(--texto); }
 .segmentado button.ativo { background: var(--painel-2); color: var(--texto); box-shadow: inset 0 0 0 1px var(--destaque); }
 
+.erro-legendas > div { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
 .andamento-legendas { padding: 8px 10px; border-radius: var(--raio); background: var(--destaque-fundo); }
 .andamento-legendas p { margin: 6px 0 0; color: var(--texto-2); font-size: 12px; }
 
