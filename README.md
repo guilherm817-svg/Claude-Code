@@ -119,6 +119,13 @@ No arquivo `.env` (veja `.env.example`):
 | `ANALISADOR_DISPOSITIVO` | `auto` | `cpu` para nunca tentar a GPU |
 | `ANALISADOR_PASTA_DADOS` | `biblioteca` | onde ficam transcrições e análises |
 
+## 🎬 Player de VSL
+
+A pasta [`player/`](player/README.md) tem um player de vídeo para páginas de vendas no estilo VTurb: autoplay
+mudo com "clique para ouvir", barra de progresso inteligente, botão de compra que aparece no minuto certo,
+"continuar de onde parou", sem controles de avanço e com eventos para pixels e retenção. É independente do
+app: são dois arquivos (`vsl-player.js` e `vsl-player.css`) para colar em qualquer página.
+
 ## Para desenvolvedores
 
 ```
@@ -132,6 +139,7 @@ analisador/
   exportar.py              Markdown, Anki, .txt e .srt
   __main__.py              linha de comando
 tests/                     pytest (o Claude e o Whisper são simulados)
+player/                    player de VSL (JavaScript puro) com demo, documentação e teste no Chromium
 ```
 
 ```bash

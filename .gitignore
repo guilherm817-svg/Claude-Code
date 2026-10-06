@@ -7,3 +7,11 @@ __pycache__/
 # Dados locais: suas aulas processadas e sua chave de API
 biblioteca/
 .env
+
+# Player de VSL: arquivos gerados pelo teste
+player/testes/teste.webm
+player/testes/t1.html
+player/testes/t2.html
+player/testes/t3.html
+player/testes/capturas/
+player/testes/node_modules/

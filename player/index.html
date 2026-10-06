@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Demonstração · VSL Player</title>
+  <link rel="stylesheet" href="vsl-player.css">
+  <style>
+    :root { color-scheme: light; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: #0f0f12;
+      color: #f3f3f5;
+      line-height: 1.5;
+    }
+    main { max-width: 860px; margin: 0 auto; padding: 32px 16px 80px; }
+    .eyebrow { margin: 0 0 8px; text-align: center; color: #fbbf24; font-weight: 700; letter-spacing: .08em; font-size: 13px; }
+    h1 { margin: 0 0 20px; text-align: center; font-size: clamp(22px, 4.5vw, 36px); line-height: 1.2; }
+    .vsl-player { --vsl-radius: 12px; box-shadow: 0 20px 60px rgba(0,0,0,.6); }
+    .note { margin: 16px 0 0; text-align: center; color: #9ca3af; font-size: 14px; }
+    .cta { margin-top: 24px; text-align: center; animation: aparecer .5s ease-out; }
+    .btn {
+      display: inline-block; padding: 18px 36px; border-radius: 12px; background: #16a34a; color: #fff;
+      font-weight: 800; font-size: 18px; text-decoration: none; letter-spacing: .02em;
+      box-shadow: 0 10px 30px rgba(22,163,74,.4);
+    }
+    .btn:hover { filter: brightness(1.08); }
+    .cta p { color: #9ca3af; font-size: 13px; margin: 10px 0 0; }
+    section { margin-top: 48px; }
+    h2 { font-size: 18px; margin: 0 0 12px; color: #d1d5db; }
+    pre {
+      margin: 0; padding: 14px; border-radius: 10px; background: #18181d; color: #d4d4d8;
+      font-size: 12.5px; line-height: 1.55; overflow: auto; max-height: 260px; white-space: pre-wrap; word-break: break-word;
+    }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .dica { color: #9ca3af; font-size: 13px; margin: 8px 0 0; }
+    .dica button { margin-left: 6px; padding: 4px 10px; border-radius: 6px; border: 1px solid #3f3f46; background: #27272a; color: #e4e4e7; cursor: pointer; }
+    @keyframes aparecer { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+  </style>
+</head>
+<body>
+<main>
+  <p class="eyebrow">ATENÇÃO: ASSISTA ATÉ O FINAL</p>
+  <h1>Como um coelho gigante virou o vídeo de teste mais famoso da internet</h1>
+
+  <!--
+    O player. Troque data-src pelo seu vídeo (MP4 ou .m3u8) e data-poster pela capa.
+    data-pitch="20" marca o início da oferta (dispara o evento "pitch" uma vez por visitante).
+    data-resume-min="5" é só para a demonstração; o padrão é 10 segundos.
+  -->
+  <div class="vsl-player" id="vsl-demo"
+       data-src="https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
+       data-poster="https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/images/BigBuckBunny.jpg"
+       data-color="#e11d48"
+       data-pitch="20"
+       data-resume-min="5"
+       data-fullscreen="true"></div>
+
+  <!-- Some quando o vídeo chega aos 20 segundos -->
+  <p class="note" data-vsl-hide-at="20">🔒 O botão de compra aparece quando o vídeo chegar na oferta (aos 20 segundos, nesta demonstração).</p>
+
+  <!-- Aparece quando o vídeo chega aos 20 segundos (e continua visível se a página for recarregada) -->
+  <div class="cta" data-vsl-show-at="20">
+    <a class="btn" href="#oferta">QUERO GARANTIR MINHA VAGA</a>
+    <p>Compra 100% segura · Garantia de 7 dias</p>
+  </div>
+
+  <section>
+    <h2>Eventos do player (ao vivo)</h2>
+    <pre id="log"></pre>
+    <p class="dica">
+      Recarregue a página depois de assistir alguns segundos com som para ver o "continuar de onde parou".
+      <button type="button" id="esquecer">Esquecer este visitante</button>
+    </p>
+  </section>
+
+  <section>
+    <h2>Como colocar na sua página</h2>
+<pre><code>&lt;link rel="stylesheet" href="vsl-player.css"&gt;
+
+&lt;div class="vsl-player"
+     data-src="https://seu-cdn.com/vsl.mp4"
+     data-poster="https://seu-cdn.com/capa.jpg"
+     data-color="#e11d48"
+     data-pitch="12:30"&gt;&lt;/div&gt;
+
+&lt;!-- aparece quando o vídeo chega em 12:30 --&gt;
+&lt;a class="botao-comprar" data-vsl-show-at="12:30" href="..."&gt;COMPRAR AGORA&lt;/a&gt;
+
+&lt;script src="vsl-player.js"&gt;&lt;/script&gt;</code></pre>
+  </section>
+</main>
+
+<script src="vsl-player.js"></script>
+<script>
+  // Registro dos eventos na tela (o evento "progress" dispara várias vezes por segundo, por isso fica de fora).
+  const log = document.getElementById('log');
+  const inicio = Date.now();
+  VSLPlayer.on('*', (detail, nome) => {
+    if (nome === 'progress' || nome === 'state') return;
+    const extras = Object.entries(detail)
+      .filter(([k, v]) => k !== 'player' && k !== 'id' && k !== 'element' && typeof v !== 'object')
+      .map(([k, v]) => k + '=' + (typeof v === 'number' ? v.toFixed(1) : v))
+      .join(' ');
+    log.textContent += ((Date.now() - inicio) / 1000).toFixed(1).padStart(6) + 's  ' + nome.padEnd(16) + extras + '\n';
+    log.scrollTop = log.scrollHeight;
+  });
+
+  // Exemplo de integração com pixels: descomente o que usar.
+  // VSLPlayer.on('unmute', () => fbq('trackCustom', 'VSL_Play'));
+  // VSLPlayer.on('pitch', () => fbq('trackCustom', 'VSL_Pitch'));
+  // VSLPlayer.on('milestone', ({ percent }) => gtag('event', 'video_progress', { percent }));
+
+  document.getElementById('esquecer').addEventListener('click', () => {
+    VSLPlayer.get('vsl-demo').forget();
+    location.reload();
+  });
+</script>
+</body>
+</html>
