@@ -4,7 +4,9 @@ import fs from 'node:fs';
 
 export function criarD1() {
   const db = new DatabaseSync(':memory:');
-  db.exec(fs.readFileSync(new URL('../migrations/0001_inicial.sql', import.meta.url), 'utf8'));
+  for (const arq of ['0001_inicial.sql', '0002_players_e_indice.sql']) {
+    db.exec(fs.readFileSync(new URL('../migrations/' + arq, import.meta.url), 'utf8'));
+  }
   return {
     prepare(sql) {
       const st = db.prepare(sql);

@@ -157,6 +157,7 @@
     .token { display: flex; gap: 8px; justify-content: center; margin-top: 12px; }
     .token input { border: 1px solid var(--border); background: var(--surface); border-radius: 6px; padding: 6px 8px; width: 240px; }
     .erro { color: #d03b3b; }
+    .aviso { margin: 0 0 16px; padding: 10px 14px; border-radius: 10px; background: rgba(250, 178, 25, 0.14); border: 1px solid rgba(250, 178, 25, 0.5); color: var(--ink); font-size: 13px; }
     @media (max-width: 640px) {
       .filtros { position: static; }
       .tile .valor { font-size: 26px; }
@@ -191,7 +192,7 @@
 
   <div id="pedir-token" class="card vazio oculto">
     <h2>Este painel pede um token</h2>
-    <p class="legenda-texto">Informe o valor passado em <code>--token</code> ao iniciar o servidor.</p>
+    <p class="legenda-texto">Informe o token configurado no servidor (opção <code>--token</code> no Python ou segredo <code>TOKEN</code> na Cloudflare).</p>
     <form class="token" id="form-token">
       <input type="password" id="campo-token" placeholder="token" autocomplete="off">
       <button type="submit" class="botao">Entrar</button>
@@ -200,6 +201,7 @@
   </div>
 
   <div id="conteudo" class="oculto">
+    <p id="sem-token" class="aviso oculto">Este painel está sem senha: qualquer pessoa com o endereço vê os dados. Defina um token (opção <code>--token</code> no Python ou segredo <code>TOKEN</code> na Cloudflare).</p>
     <section class="kpis" id="kpis"></section>
 
     <figure class="card" id="fig-retencao">
@@ -290,8 +292,9 @@
   // ---------------------------------------------------------------- estado e API
   const estado = { periodo: '30', de: '', ate: '', player: '' };
   try { Object.assign(estado, JSON.parse(sessionStorage.getItem('vsl-painel') || '{}')); } catch (e) { /* ignora */ }
-  const urlToken = new URLSearchParams(location.search).get('token');
-  if (urlToken) { try { sessionStorage.setItem('vsl-token', urlToken); } catch (e) { /* ignora */ } history.replaceState(null, '', location.pathname); }
+  // O token pode vir no fragmento (#token=...), que nunca sai do navegador, ou na query (?token=...), por compatibilidade.
+  const urlToken = (/[#&]token=([^&]+)/.exec(location.hash) || [])[1] || new URLSearchParams(location.search).get('token');
+  if (urlToken) { try { sessionStorage.setItem('vsl-token', decodeURIComponent(urlToken)); } catch (e) { /* ignora */ } history.replaceState(null, '', location.pathname); }
   const token = () => { try { return sessionStorage.getItem('vsl-token') || ''; } catch (e) { return ''; } };
 
   async function api(caminho, params) {
@@ -342,6 +345,7 @@
       const [players, resumo] = await Promise.all([api('api/players'), api('api/resumo', Object.assign({ player: estado.player }, filtros()))]);
       if (meu !== pedido) return; // chegou um pedido mais novo enquanto este esperava
       $('#pedir-token').classList.add('oculto');
+      $('#sem-token').classList.toggle('oculto', pedeToken !== false);
       if (!preencherPlayers(players.players)) { carregar(); return; } // o player filtrado sumiu: recarrega sem filtro
       ultimo = resumo;
       preencherDatas(resumo.de, resumo.ate);
@@ -570,7 +574,8 @@
         coluna(cx, d.sessoes, 'barra-1'); // com muitos dias, os plays ficam sobrepostos às visualizações
         coluna(cx, d.plays, 'barra-2');
       }
-      if (i % cadaRotulo === 0 || i === dias.length - 1) {
+      const ultimo = i === dias.length - 1;
+      if (ultimo || (i % cadaRotulo === 0 && dias.length - 1 - i >= Math.max(1, cadaRotulo / 2))) {
         svgEl('text', { x: cx, y: H - m.bottom + 18, 'text-anchor': 'middle' }, svg).textContent = fmtDia(d.dia);
       }
     });

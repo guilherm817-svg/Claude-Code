@@ -2,15 +2,22 @@
 
 A mesma coisa que o `servidor.py` da pasta de cima, mas rodando de graça na Cloudflare: um **Worker** recebe os
 envios do player e um banco **D1** guarda as sessões. Não precisa de VPS, não precisa de cartão, e o endereço
-já vem com HTTPS. O plano gratuito dá 100 mil requisições por dia e 100 mil gravações por dia no banco, o que
-cobre dezenas de milhares de visitas diárias.
+já vem com HTTPS.
+
+**Quanto cabe no plano gratuito:** 100 mil requisições e 100 mil gravações por dia. Cada visita gera 1 envio,
+mais cerca de 4 por minuto assistido com som (a cada 15 s, mais um ao tirar o mudo, no pitch, no fim e ao sair),
+e o painel aberto gasta 2 requisições por minuto. Na prática, uns 20 mil minutos assistidos por dia, por exemplo
+2 mil pessoas assistindo 10 minutos. Em sites maiores, suba `data-analytics-interval` para 30 ou 60 no player
+e, se precisar, o plano pago da Cloudflare (US$ 5/mês) multiplica os limites por 100 e dá 30 s de CPU por
+requisição (no grátis são 10 ms, suficientes para períodos com até uns 3 mil plays).
 
 ## Colocar no ar (um clique)
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/guilherm817-svg/Claude-Code/tree/claude/determined-planck-3oymh2/player/analytics/cloudflare)
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/guilherm817-svg/Claude-Code)
 
 1. Clique no botão. Entre (ou crie uma conta) na Cloudflare e conecte o GitHub quando ele pedir.
-2. A Cloudflare copia esta pasta para um repositório seu, cria o banco D1 sozinha e publica o Worker.
+2. A Cloudflare liga o repositório, cria o banco D1 sozinha e publica o Worker (a configuração na raiz do
+   repositório aponta para esta pasta; o Worker cria as tabelas sozinho no primeiro acesso).
 3. No fim aparece o endereço, parecido com `https://claude-code.SEU-NOME.workers.dev`.
 4. No player, use esse endereço com `/vsl` no final:
 
@@ -25,7 +32,12 @@ O painel abre no mesmo endereço, sem o `/vsl`.
 
 No site da Cloudflare: **Workers & Pages → claude-code → Settings → Variables and Secrets → Add**, tipo
 *Secret*, nome `TOKEN`, valor uma senha longa. Clique em *Deploy*. A partir daí o painel pede essa senha; os
-envios do player continuam abertos. A variável `FUSO` (padrão `America/Sao_Paulo`) define o fuso das datas.
+envios do player continuam abertos. Enquanto não houver token, o painel mostra um aviso em amarelo.
+
+Para abrir o painel já com a senha, use o fragmento da URL: `https://SEU-WORKER.workers.dev/#token=SUA-SENHA`
+(o que vem depois de `#` não sai do navegador nem vai para os logs). A API aceita o token só no cabeçalho
+`X-Token` (ou `Authorization: Bearer`), nunca na query string. A variável `FUSO` (padrão `America/Sao_Paulo`)
+define o fuso das datas.
 
 ## Se preferir pelo terminal
 
@@ -45,7 +57,13 @@ Para rodar no seu computador: `npm run dev` e abra http://localhost:8787.
   caber no plano gratuito). Por isso a tabela de eventos conta repetições, sem deduplicar reenvios.
 - O pitch e a duração de cada player vêm da sessão mais recente que os informou.
 - As datas usam o fuso da variável `FUSO`; o Python usa o relógio do computador onde roda.
-- O CSV sai com `Content-Disposition`, mas o download pelo painel é o mesmo.
+- O CSV tem as mesmas 19 colunas do Python e mais uma no fim, `dia`, que é a data no fuso `FUSO` (o `inicio`
+  é em UTC).
+- Cada sessão guarda até 50 tipos de evento diferentes.
+- Arredondamentos em empate exato (.5) podem diferir do Python em uma unidade da última casa decimal.
+- A rota de coleta é pública e sem limite de taxa, como no Python. Se alguém inundar o Worker, a proteção que
+  poupa a cota é uma regra de *rate limiting* no WAF da Cloudflare (grátis, 1 regra) num domínio seu apontando
+  para o Worker.
 
 Tudo o mais (rotas, números, limites, token) é igual ao que está documentado em
 [`../README.md`](../README.md).

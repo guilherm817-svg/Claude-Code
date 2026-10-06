@@ -191,6 +191,60 @@ test('csv neutraliza fórmulas e escapa separadores', async () => {
   assert.ok(linha.startsWith("'=cmd"));
   assert.ok(linha.includes(";'+1;"));
   assert.ok(linha.includes(";'@sum(1);'@SUM(1);;\"'-x;y\";"));
+  const cabecalho = (await csv(db)).split('\n')[0].split(';');
+  assert.equal(cabecalho.length, 20); assert.equal(cabecalho[19], 'dia'); assert.equal(cabecalho[3], 'inicio');
+});
+
+test('chaves vindas do visitante não corrompem nada (utm_source=__proto__, eventos constructor/__proto__)', async () => {
+  const db = criarD1();
+  await registrar(db, envio('a'));
+  await registrar(db, envio('b', { url: 'https://site.com/?utm_source=__proto__', events: [{ type: 'constructor' }, { type: '__proto__' }, { type: 'hasOwnProperty' }, { type: 'cta_click' }] }));
+  await registrar(db, envio('b', { url: 'https://site.com/?utm_source=__proto__', events: [{ type: '__proto__' }] }));
+  await registrar(db, envio('c', { player: 'constructor', pitch: 7 }));
+  const r = await resumo(db);
+  assert.equal(r.sessoes, 3);
+  assert.equal(r.origens.reduce((n, o) => n + o.sessoes, 0), 3, 'a tabela de origens soma todas as sessões');
+  assert.ok(r.origens.some((o) => o.nome === '__proto__'));
+  const tipos = Object.fromEntries(r.eventos.map((e) => [e.tipo, e.total]));
+  assert.equal(tipos.constructor, 1); assert.equal(tipos.__proto__, 2); assert.equal(tipos.hasOwnProperty, 1); assert.equal(tipos.cta_click, 1);
+  assert.equal(Object.prototype.sessoes, undefined); assert.equal(Object.prototype.plays, undefined); assert.equal(Object.duracao, undefined);
+  assert.equal((await resumo(db, { player: 'constructor' })).pitch, 7);
+  const r2 = await resumo(db);
+  assert.equal(r2.pitch_misto, true); assert.equal(r2.pitch, null);
+});
+
+test('muitos tipos de evento: só os primeiros 50 ficam', async () => {
+  const db = criarD1();
+  await registrar(db, envio('s1', { events: Array.from({ length: 80 }, (_, i) => ({ type: 'tipo' + i })) }));
+  await registrar(db, envio('s1', { events: Array.from({ length: 80 }, (_, i) => ({ type: 'outro' + i })) }));
+  assert.ok((await resumo(db)).eventos.length <= 50);
+});
+
+test('envios simultâneos da mesma sessão não dão erro nem perdem dados', async () => {
+  const db = criarD1();
+  await Promise.all([
+    registrar(db, envio('s1', { watched: [[0, 9]], maxTime: 10, events: [{ type: 'unmute' }] })),
+    registrar(db, envio('s1', { watched: [[10, 19]], maxTime: 20, events: [{ type: 'pitch' }, { type: 'ended' }] })),
+    registrar(db, envio('s1', { watched: [[20, 29]], maxTime: 30, events: [{ type: 'pause' }] })),
+  ]);
+  const [s] = await sessoes(db);
+  assert.deepEqual(JSON.parse(s.assistido), [[0, 29]]);
+  assert.equal(s.max_tempo, 30); assert.equal(s.terminou, 1);
+  assert.deepEqual(JSON.parse(s.eventos), { unmute: 1, pitch: 1, ended: 1, pause: 1 });
+  assert.equal((await players(db))[0].sessoes, 1);
+});
+
+test('tabela players: contagem, pitch e duração mais recentes, e preenchimento de bancos antigos', async () => {
+  const db = criarD1();
+  await registrar(db, envio('a', { duration: 0, pitch: 30 }), '', FUSO, em('2026-10-01T13:00:00Z'));
+  await registrar(db, envio('a', { duration: 600 }), '', FUSO, em('2026-10-01T13:00:10Z'));
+  await registrar(db, envio('b', { duration: 120, pitch: 45 }), '', FUSO, em('2026-10-02T13:00:00Z'));
+  let [p] = await players(db);
+  assert.equal(p.sessoes, 2); assert.equal(p.pitch, 45); assert.equal(p.duracao, 120); assert.equal(p.primeiro, '2026-10-01T13:00:00Z');
+  // banco antigo: apaga a tabela players e vê se ela é reconstruída a partir das sessões
+  await db.prepare('DELETE FROM players').run();
+  [p] = await players(db);
+  assert.equal(p.sessoes, 2); assert.equal(p.pitch, 45); assert.equal(p.duracao, 120);
 });
 
 // ---------------------------------------------------------------- HTTP
@@ -207,7 +261,7 @@ test('coleta aceita text/plain com CORS e o resumo reflete o envio', async () =>
   assert.equal(r.status, 204); assert.equal(r.headers.get('Access-Control-Allow-Origin'), '*');
   r = await pedir('OPTIONS', '/vsl');
   assert.equal(r.status, 204); assert.ok(r.headers.get('Access-Control-Allow-Methods').includes('POST'));
-  r = await pedir('GET', '/api/resumo?token=segredo&player=vsl-principal');
+  r = await pedir('GET', '/api/resumo?player=vsl-principal', null, { 'X-Token': 'segredo' });
   const resumoJson = await r.json();
   assert.equal(r.status, 200); assert.equal(resumoJson.sessoes, 1); assert.equal(resumoJson.dispositivos[0].nome, 'celular');
 });
@@ -217,6 +271,8 @@ test('coleta recusa envios ruins', async () => {
   assert.equal((await pedir('POST', '/vsl', '{nao e json')).status, 400);
   assert.equal((await pedir('POST', '/vsl', '{"player": "p"}')).status, 400);
   assert.equal((await pedir('POST', '/vsl', '')).status, 400);
+  assert.equal((await pedir('POST', '/vsl')).status, 400, 'POST sem corpo dá 400, não 500');
+  assert.equal((await pedir('POST', '/vsl', 'é'.repeat(LIMITE_CORPO / 2 + 10))).status, 413, 'o limite conta bytes, não caracteres');
   assert.equal((await pedir('POST', '/vsl', 'x'.repeat(LIMITE_CORPO + 1))).status, 413);
   assert.equal((await pedir('POST', '/vsl', 'x', { 'Content-Length': String(LIMITE_CORPO + 1) })).status, 413);
   assert.equal((await pedir('POST', '/outro', '{}')).status, 404);
@@ -231,10 +287,12 @@ test('painel é público; API e CSV pedem token; parâmetros inválidos dão 400
   assert.equal((await pedir('GET', '/api/resumo')).status, 401);
   assert.equal((await pedir('GET', '/api/resumo', null, { 'X-Token': 'errado' })).status, 401);
   assert.equal((await pedir('GET', '/api/resumo', null, { 'X-Token': 'segredo' })).status, 200);
+  assert.equal((await pedir('GET', '/api/resumo', null, { Authorization: 'Bearer segredo' })).status, 200);
+  assert.equal((await pedir('GET', '/api/resumo?token=segredo')).status, 401, 'token na query string não vale (iria para os logs)');
   let r = await pedir('GET', '/');
   assert.equal(r.status, 200); assert.ok(r.headers.get('Content-Type').includes('text/html')); assert.ok((await r.text()).includes('Reten'));
   assert.equal((await pedir('GET', '/api/sessoes.csv')).status, 401);
-  r = await pedir('GET', '/api/sessoes.csv?token=segredo&player=../x"y;%20z%C3%A7');
+  r = await pedir('GET', '/api/sessoes.csv?player=../x"y;%20z%C3%A7', null, { 'X-Token': 'segredo' });
   assert.equal(r.status, 200); assert.equal(r.headers.get('Content-Disposition'), 'attachment; filename="sessoes-.._x_y_z.csv"');
   assert.ok((await r.text()).startsWith('sessao;')); // o BOM vai no corpo, mas text() o remove
   r = await pedir('GET', '/api/config');
@@ -242,13 +300,15 @@ test('painel é público; API e CSV pedem token; parâmetros inválidos dão 400
   assert.equal((await pedir('GET', '/saude')).status, 200);
   assert.equal((await pedir('GET', '/nada')).status, 404);
   assert.equal((await pedir('GET', '/painel.html')).status, 404);
-  r = await pedir('HEAD', '/api/resumo?token=segredo');
+  r = await pedir('HEAD', '/api/resumo', null, { 'X-Token': 'segredo' });
   assert.equal(r.status, 200); assert.equal(await r.text(), '');
   const cab = { 'X-Token': 'segredo' };
   assert.equal((await pedir('GET', '/api/resumo?de=2026-13-01', null, cab)).status, 400);
   assert.equal((await pedir('GET', '/api/resumo?ate=ontem', null, cab)).status, 400);
   assert.equal((await pedir('GET', '/api/resumo?pitch=abc', null, cab)).status, 400);
   assert.equal((await pedir('GET', '/api/resumo?periodo=x', null, cab)).status, 400);
+  assert.equal((await pedir('GET', '/api/resumo?periodo=constructor', null, cab)).status, 400);
+  assert.equal((await pedir('GET', '/api/resumo?periodo=__proto__', null, cab)).status, 400);
   assert.equal((await pedir('GET', '/api/resumo?periodo=7&pitch=12.5', null, cab)).status, 200);
   assert.equal((await pedir('GET', '/api/sessoes.csv?de=2026-99-99', null, cab)).status, 400);
   assert.equal((await pedir('PUT', '/vsl', '{}')).status, 405);
@@ -263,12 +323,12 @@ test('sem TOKEN configurado o painel e a API ficam abertos', async () => {
 test('o esquema é criado sozinho na primeira requisição quando a migração não rodou', async () => {
   const fs = await import('node:fs');
   const { DatabaseSync } = await import('node:sqlite');
-  const esquema = fs.readFileSync(new URL('../migrations/0001_inicial.sql', import.meta.url), 'utf8');
+  const esquema = ['0001_inicial.sql', '0002_players_e_indice.sql'].map((a) => fs.readFileSync(new URL('../migrations/' + a, import.meta.url), 'utf8')).join('\n');
   const bruto = new DatabaseSync(':memory:'); // sem tabela nenhuma
   const db = {
     prepare(sql) { const st = bruto.prepare(sql); const stmt = { args: [], bind(...a) { stmt.args = a.map((x) => (x === undefined ? null : x)); return stmt; },
       async first() { const r = st.get(...stmt.args); return r == null ? null : { ...r }; }, async all() { return { results: st.all(...stmt.args).map((r) => ({ ...r })) }; },
-      async run() { st.run(...stmt.args); return { success: true }; } }; return stmt; },
+      async run() { const r = st.run(...stmt.args); return { success: true, meta: { changes: r.changes } }; } }; return stmt; },
     async batch(stmts) { const saida = []; for (const s of stmts) saida.push(await s.run()); return saida; },
   };
   const a = criarApp({ painel: '<p>painel</p>', esquema });

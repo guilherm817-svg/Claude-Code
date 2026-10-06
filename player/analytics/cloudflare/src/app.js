@@ -24,7 +24,11 @@ export const PONTOS_CURVA = 1200;
 export const FUSO_PADRAO = 'America/Sao_Paulo';
 
 const CAMINHOS_COLETA = new Set(['/vsl', '/coletar', '/']);
-const PERIODOS = { hoje: 0, 7: 6, 30: 29, 90: 89 };
+const MAX_TIPOS_EVENTO = 50;   // tipos de evento distintos guardados por sessão
+const TENTATIVAS_GRAVACAO = 5; // envios simultâneos da mesma sessão: relê e refaz
+// Mapas indexados por texto vindo do visitante nunca têm prototype (utm_source=__proto__ não pode corromper nada).
+const semProto = (obj) => Object.assign(Object.create(null), obj || {});
+const PERIODOS = semProto({ hoje: 0, 7: 6, 30: 29, 90: 89 });
 const ORIGENS_CONHECIDAS = [
   [/(^|\.)facebook\.com$|^fb\.me$|^fb\.com$/, 'facebook'],
   [/(^|\.)instagram\.com$/, 'instagram'],
@@ -35,9 +39,11 @@ const ORIGENS_CONHECIDAS = [
   [/(^|\.)whatsapp\.com$/, 'whatsapp'],
   [/(^|\.)linkedin\.com$/, 'linkedin'],
 ];
-const COLUNAS_CSV = ['sessao', 'player', 'visitante', 'inicio', 'dia', 'ultimo', 'origem', 'utm_source', 'utm_medium',
+// As 19 primeiras colunas são as mesmas do servidor Python; `dia` (no fuso FUSO) vai no fim.
+const COLUNAS_CSV = ['sessao', 'player', 'visitante', 'inicio', 'ultimo', 'origem', 'utm_source', 'utm_medium',
   'utm_campaign', 'utm_content', 'utm_term', 'dispositivo', 'url', 'referrer', 'duracao', 'max_tempo', 'segundos',
-  'com_som', 'terminou'];
+  'com_som', 'terminou', 'dia'];
+const COLUNAS_RESUMO = 'player, visitante, dia, origem, dispositivo, com_som, terminou, max_tempo, duracao, segundos, assistido, eventos';
 
 // ----------------------------------------------------------------------------- cálculos
 
@@ -185,11 +191,13 @@ export function validarEnvio(dados) {
   const faixas = dados.watched || [];
   if (!Array.isArray(eventos) || !Array.isArray(faixas)) throw new Error('events e watched precisam ser listas');
   if (eventos.length > MAX_EVENTOS || faixas.length > MAX_FAIXAS) throw new Error('envio grande demais');
-  const contagem = {};
+  const contagem = Object.create(null);
+  let tipos = 0;
   for (const ev of eventos) {
     if (!ev || typeof ev !== 'object') continue;
     const tipo = texto(ev.type, 60);
     if (!tipo) continue;
+    if (!(tipo in contagem)) { if (tipos >= MAX_TIPOS_EVENTO) continue; tipos += 1; }
     contagem[tipo] = (contagem[tipo] || 0) + 1;
   }
   return {
@@ -202,7 +210,7 @@ export function validarEnvio(dados) {
     maxTempo: Math.round(numero(dados.maxTime, 0, MAX_SEGUNDOS) * 100) / 100,
     comSom: dados.unmuted ? 1 : 0,
     faixas: unirFaixas(faixas),
-    eventos: contagem,
+    eventos: Object.fromEntries(Object.entries(contagem)), // objeto comum, com "__proto__" como chave própria se vier
     terminou: contagem.ended ? 1 : 0,
     pitch: pitchValido(dados.pitch),
   };
@@ -228,33 +236,60 @@ const momentoIso = (data) => data.toISOString().slice(0, 19) + 'Z';
 export async function registrar(db, dados, userAgent = '', fuso = FUSO_PADRAO, agora = new Date()) {
   const envio = validarEnvio(dados);
   const momento = momentoIso(agora);
-  const atual = await db.prepare('SELECT assistido, max_tempo, com_som, duracao, terminou, eventos, pitch FROM sessoes WHERE sessao = ?')
-    .bind(envio.sessao).first();
-  if (atual) {
+  for (let tentativa = 0; tentativa < TENTATIVAS_GRAVACAO; tentativa++) {
+    const atual = await db.prepare('SELECT assistido, max_tempo, com_som, duracao, terminou, eventos, pitch FROM sessoes WHERE sessao = ?')
+      .bind(envio.sessao).first();
+    if (!atual) {
+      const faixas = envio.faixas;
+      const marcas = utms(envio.url);
+      const r = await db.prepare('INSERT INTO sessoes (sessao, player, visitante, url, referrer, origem, utm_source, utm_medium, '
+        + 'utm_campaign, utm_content, utm_term, dispositivo, user_agent, inicio, dia, ultimo, duracao, max_tempo, com_som, terminou, '
+        + 'assistido, segundos, pitch, eventos) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(sessao) DO NOTHING')
+        .bind(envio.sessao, envio.player, envio.visitante, envio.url, envio.referrer, origem(marcas.utm_source, envio.referrer),
+          marcas.utm_source, marcas.utm_medium, marcas.utm_campaign, marcas.utm_content, marcas.utm_term, dispositivo(userAgent),
+          texto(userAgent, 500), momento, hojeNoFuso(fuso, agora), momento, envio.duracao,
+          Math.min(envio.maxTempo, fimDasFaixas(faixas)), envio.comSom, envio.terminou, JSON.stringify(faixas),
+          limitarSegundos(faixas, envio.duracao), envio.pitch, JSON.stringify(envio.eventos))
+        .run();
+      if (mudou(r) === 0) continue; // outro envio da mesma sessão chegou primeiro: refaz como atualização
+      await atualizarPlayer(db, envio, momento, 1);
+      return;
+    }
     const faixas = unirFaixas(JSON.parse(atual.assistido).concat(envio.faixas));
     const duracao = Math.max(atual.duracao, envio.duracao);
     // O "até onde chegou" nunca passa do que as faixas mostram: protege contra um maxTime inflado.
     const maxTempo = Math.min(Math.max(atual.max_tempo, envio.maxTempo), fimDasFaixas(faixas));
-    const eventos = JSON.parse(atual.eventos || '{}');
-    for (const [tipo, n] of Object.entries(envio.eventos)) eventos[tipo] = (eventos[tipo] || 0) + n;
-    await db.prepare('UPDATE sessoes SET ultimo = ?, duracao = ?, max_tempo = ?, com_som = ?, terminou = ?, assistido = ?, '
-      + 'segundos = ?, eventos = ?, pitch = COALESCE(?, pitch) WHERE sessao = ?')
+    const eventos = semProto(JSON.parse(atual.eventos || '{}'));
+    for (const [tipo, n] of Object.entries(envio.eventos)) {
+      if (!(tipo in eventos) && Object.keys(eventos).length >= MAX_TIPOS_EVENTO) continue;
+      eventos[tipo] = (Number(eventos[tipo]) || 0) + n;
+    }
+    // Só grava se a linha ainda for a que foi lida (assistido/eventos iguais); senão relê e soma de novo.
+    const r = await db.prepare('UPDATE sessoes SET ultimo = ?, duracao = ?, max_tempo = ?, com_som = ?, terminou = ?, assistido = ?, '
+      + 'segundos = ?, eventos = ?, pitch = COALESCE(?, pitch) WHERE sessao = ? AND assistido = ? AND eventos = ?')
       .bind(momento, duracao, maxTempo, Math.max(atual.com_som, envio.comSom), Math.max(atual.terminou, envio.terminou),
-        JSON.stringify(faixas), limitarSegundos(faixas, duracao), JSON.stringify(eventos), envio.pitch, envio.sessao)
+        JSON.stringify(faixas), limitarSegundos(faixas, duracao), JSON.stringify(Object.fromEntries(Object.entries(eventos))),
+        envio.pitch, envio.sessao, atual.assistido, atual.eventos || '{}')
       .run();
+    if (mudou(r) === 0) continue;
+    const pitchNovo = envio.pitch != null && envio.pitch !== atual.pitch;
+    const duracaoNova = envio.duracao > 0 && envio.duracao !== atual.duracao;
+    if (pitchNovo || duracaoNova) await atualizarPlayer(db, envio, momento, 0);
     return;
   }
-  const faixas = envio.faixas;
-  const marcas = utms(envio.url);
-  await db.prepare('INSERT INTO sessoes (sessao, player, visitante, url, referrer, origem, utm_source, utm_medium, utm_campaign, '
-    + 'utm_content, utm_term, dispositivo, user_agent, inicio, dia, ultimo, duracao, max_tempo, com_som, terminou, assistido, '
-    + 'segundos, pitch, eventos) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
-    .bind(envio.sessao, envio.player, envio.visitante, envio.url, envio.referrer, origem(marcas.utm_source, envio.referrer),
-      marcas.utm_source, marcas.utm_medium, marcas.utm_campaign, marcas.utm_content, marcas.utm_term, dispositivo(userAgent),
-      texto(userAgent, 500), momento, hojeNoFuso(fuso, agora), momento, envio.duracao,
-      Math.min(envio.maxTempo, fimDasFaixas(faixas)), envio.comSom, envio.terminou, JSON.stringify(faixas),
-      limitarSegundos(faixas, envio.duracao), envio.pitch, JSON.stringify(envio.eventos))
-    .run();
+  throw new Error('nao foi possivel gravar a sessao: muitos envios simultaneos');
+}
+
+// Quantas linhas um run() mudou (D1 informa em meta.changes; sem a informação, assume que mudou).
+const mudou = (r) => (r && r.meta && typeof r.meta.changes === 'number' ? r.meta.changes : 1);
+
+/** Mantém o resumo por player: pitch e duração mais recentes, primeira e última sessão, total de sessões. */
+async function atualizarPlayer(db, envio, momento, novas) {
+  await db.prepare('INSERT INTO players (player, pitch, duracao, primeiro, ultimo, sessoes) VALUES (?,?,?,?,?,?) '
+    + 'ON CONFLICT(player) DO UPDATE SET pitch = COALESCE(excluded.pitch, players.pitch), '
+    + 'duracao = CASE WHEN excluded.duracao > 0 THEN excluded.duracao ELSE players.duracao END, '
+    + 'ultimo = excluded.ultimo, sessoes = players.sessoes + excluded.sessoes')
+    .bind(envio.player, envio.pitch, envio.duracao, momento, momento, novas).run();
 }
 
 function filtro(player, de, ate) {
@@ -266,27 +301,41 @@ function filtro(player, de, ate) {
   return { where: condicoes.length ? ' WHERE ' + condicoes.join(' AND ') : '', params };
 }
 
-/** Pitch e duração de cada player, pela sessão mais recente que informou cada um. */
-async function configDosPlayers(db, player) {
-  const extra = player ? ' AND player = ?' : '';
-  const params = player ? [player] : [];
+/** Bancos criados antes da tabela players: monta a tabela a partir das sessões uma única vez. */
+async function preencherPlayers(db) {
+  const total = await db.prepare('SELECT COUNT(*) AS n FROM players').first('n');
+  if (total > 0) return;
+  const temSessoes = await db.prepare('SELECT COUNT(*) AS n FROM sessoes').first('n');
+  if (!temSessoes) return;
   const janela = (coluna, condicao) => db.prepare(
     `SELECT player, ${coluna} AS valor FROM (SELECT player, ${coluna}, ROW_NUMBER() OVER (PARTITION BY player ORDER BY ultimo DESC, sessao DESC) AS rn `
-    + `FROM sessoes WHERE ${condicao}${extra}) WHERE rn = 1`).bind(...params).all();
-  const [pitches, duracoes] = await Promise.all([janela('pitch', 'pitch IS NOT NULL'), janela('duracao', 'duracao > 0')]);
-  const config = {};
-  for (const linha of pitches.results) config[linha.player] = { pitch: linha.valor, duracao: 0 };
-  for (const linha of duracoes.results) (config[linha.player] = config[linha.player] || { pitch: null, duracao: 0 }).duracao = linha.valor;
+    + `FROM sessoes WHERE ${condicao}) WHERE rn = 1`).all();
+  const [{ results: base }, pitches, duracoes] = await Promise.all([
+    db.prepare('SELECT player, MIN(inicio) AS primeiro, MAX(ultimo) AS ultimo, COUNT(*) AS sessoes FROM sessoes GROUP BY player').all(),
+    janela('pitch', 'pitch IS NOT NULL'), janela('duracao', 'duracao > 0'),
+  ]);
+  const pitch = semProto(Object.fromEntries(pitches.results.map((l) => [l.player, l.valor])));
+  const duracao = semProto(Object.fromEntries(duracoes.results.map((l) => [l.player, l.valor])));
+  for (const p of base) {
+    await db.prepare('INSERT OR IGNORE INTO players (player, pitch, duracao, primeiro, ultimo, sessoes) VALUES (?,?,?,?,?,?)')
+      .bind(p.player, pitch[p.player] ?? null, duracao[p.player] || 0, p.primeiro, p.ultimo, p.sessoes).run();
+  }
+}
+
+/** Pitch e duração de cada player (os mais recentes informados), pela tabela players. */
+async function configDosPlayers(db, player) {
+  await preencherPlayers(db);
+  const { results } = await db.prepare('SELECT player, pitch, duracao FROM players' + (player ? ' WHERE player = ?' : ''))
+    .bind(...(player ? [player] : [])).all();
+  const config = Object.create(null);
+  for (const l of results) config[l.player] = { pitch: l.pitch, duracao: l.duracao || 0 };
   return config;
 }
 
 export async function players(db) {
-  const [{ results }, config] = await Promise.all([
-    db.prepare('SELECT player, COUNT(*) AS sessoes, MIN(inicio) AS primeiro, MAX(ultimo) AS ultimo FROM sessoes GROUP BY player ORDER BY ultimo DESC').all(),
-    configDosPlayers(db, null),
-  ]);
-  return results.map((p) => ({ player: p.player, pitch: (config[p.player] || {}).pitch ?? null, duracao: (config[p.player] || {}).duracao || 0,
-    primeiro: p.primeiro, ultimo: p.ultimo, sessoes: p.sessoes }));
+  await preencherPlayers(db);
+  const { results } = await db.prepare('SELECT player, pitch, duracao, primeiro, ultimo, sessoes FROM players ORDER BY ultimo DESC').all();
+  return results.map((p) => ({ player: p.player, pitch: p.pitch ?? null, duracao: p.duracao || 0, primeiro: p.primeiro, ultimo: p.ultimo, sessoes: p.sessoes }));
 }
 
 export async function sessoes(db, { player, de, ate } = {}) {
@@ -300,7 +349,7 @@ export async function resumo(db, { player = null, de = null, ate = null, pitch =
   if (periodo) [de, ate] = periodoParaDatas(periodo, hoje);
   const { where, params } = filtro(player, de, ate);
   const [{ results: linhas }, config] = await Promise.all([
-    db.prepare('SELECT * FROM sessoes' + where).bind(...params).all(),
+    db.prepare('SELECT ' + COLUNAS_RESUMO + ' FROM sessoes' + where).bind(...params).all(),
     configDosPlayers(db, player),
   ]);
 
@@ -316,8 +365,11 @@ export async function resumo(db, { player = null, de = null, ate = null, pitch =
   else pitchMisto = distintos.size > 1;
 
   const plays = linhas.filter((s) => s.com_som);
-  const duracaoConfig = Math.max(0, ...base.map((p) => (config[p] || {}).duracao || 0));
-  const duracao = Math.min(Math.max(0, ...linhas.map((s) => s.duracao)) || duracaoConfig, MAX_SEGUNDOS);
+  let duracaoConfig = 0;
+  for (const p of base) duracaoConfig = Math.max(duracaoConfig, (config[p] || {}).duracao || 0);
+  let maior = 0;
+  for (const s of linhas) if (s.duracao > maior) maior = s.duracao;
+  const duracao = Math.min(maior || duracaoConfig, MAX_SEGUNDOS);
   const chegaramPitch = plays.filter(chegou);
   const terminaram = plays.filter((s) => s.terminou);
   const tempos = plays.map((s) => s.segundos);
@@ -333,7 +385,7 @@ export async function resumo(db, { player = null, de = null, ate = null, pitch =
 
   const { passo, pontos } = compactarCurva(curvaRetencao(plays.map((s) => JSON.parse(s.assistido)), duracao));
 
-  const porDia = {};
+  const porDia = Object.create(null);
   for (const s of linhas) {
     const d = porDia[s.dia] || (porDia[s.dia] = { dia: s.dia, sessoes: 0, plays: 0 });
     d.sessoes += 1;
@@ -353,7 +405,7 @@ export async function resumo(db, { player = null, de = null, ate = null, pitch =
   }
 
   const agrupar = (chave, limite) => {
-    const grupos = {};
+    const grupos = Object.create(null);
     for (const s of linhas) {
       const g = grupos[s[chave]] || (grupos[s[chave]] = { nome: s[chave], sessoes: 0, plays: 0, pitch: 0, terminaram: 0 });
       g.sessoes += 1;
@@ -370,13 +422,13 @@ export async function resumo(db, { player = null, de = null, ate = null, pitch =
     return lista;
   };
 
-  const eventos = {};
+  const eventos = Object.create(null);
   for (const s of linhas) {
     let contagem = {};
     try { contagem = JSON.parse(s.eventos || '{}'); } catch (e) { contagem = {}; }
     for (const [tipo, n] of Object.entries(contagem)) {
       const e = eventos[tipo] || (eventos[tipo] = { tipo, total: 0, sessoes: 0 });
-      e.total += n;
+      e.total += Number(n) || 0;
       e.sessoes += 1;
     }
   }
@@ -445,9 +497,11 @@ function iguais(a, b) {
   return diferente === 0;
 }
 
+// Só por cabeçalho: na query string o token iria parar nos logs da Cloudflare.
 function autorizado(request, url, token) {
   if (!token) return true;
-  const enviado = url.searchParams.get('token') || request.headers.get('X-Token') || '';
+  const auth = request.headers.get('Authorization') || '';
+  const enviado = request.headers.get('X-Token') || (auth.startsWith('Bearer ') ? auth.slice(7) : '');
   return iguais(enviado, token);
 }
 
@@ -473,9 +527,20 @@ export function criarApp({ painel, esquema = '' }) {
     if (!CAMINHOS_COLETA.has(caminho)) return resposta(404, 'nao encontrado', { cors: true });
     const declarado = Number(request.headers.get('Content-Length') || 0);
     if (declarado > LIMITE_CORPO) return resposta(413, 'envio grande demais', { cors: true });
-    const corpo = await request.text();
-    if (!corpo) return resposta(400, 'envio vazio', { cors: true });
-    if (corpo.length > LIMITE_CORPO) return resposta(413, 'envio grande demais', { cors: true });
+    if (!request.body) return resposta(400, 'envio vazio', { cors: true });
+    // lê em pedaços e para no limite, contando bytes de verdade
+    const reader = request.body.getReader();
+    const partes = [];
+    let total = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > LIMITE_CORPO) { try { await reader.cancel(); } catch (e) { /* ignora */ } return resposta(413, 'envio grande demais', { cors: true }); }
+      partes.push(value);
+    }
+    if (!total) return resposta(400, 'envio vazio', { cors: true });
+    const corpo = await new Blob(partes).text();
     try {
       await registrar(env.DB, JSON.parse(corpo), request.headers.get('User-Agent') || '', env.FUSO || FUSO_PADRAO);
     } catch (erro) {
