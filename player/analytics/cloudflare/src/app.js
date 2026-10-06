@@ -455,10 +455,16 @@ function autorizado(request, url, token) {
 export function criarApp({ painel, esquema = '' }) {
   // O esquema é garantido na primeira requisição de cada instância (CREATE TABLE IF NOT EXISTS é barato),
   // para o Worker funcionar mesmo quando a migração não rodou no deploy.
+  // Cada comando vai num prepare() próprio: o exec() do D1 quebra o SQL por linha e não aceita comandos de várias linhas.
+  const comandos = esquema.split(';').map((c) => c.replace(/--[^\n]*/g, '').trim()).filter(Boolean);
   let esquemaPronto = null;
   const garantirEsquema = (db) => {
-    if (!esquema || !db || typeof db.exec !== 'function') return Promise.resolve();
-    if (!esquemaPronto) esquemaPronto = db.exec(esquema).catch((erro) => { esquemaPronto = null; throw erro; });
+    if (!comandos.length || !db || typeof db.prepare !== 'function') return Promise.resolve();
+    if (!esquemaPronto) {
+      // em sequência: o índice só compila depois que a tabela existe
+      esquemaPronto = (async () => { for (const c of comandos) await db.prepare(c).run(); })()
+        .catch((erro) => { esquemaPronto = null; throw erro; });
+    }
     return esquemaPronto;
   };
 

@@ -269,7 +269,7 @@ test('o esquema é criado sozinho na primeira requisição quando a migração n
     prepare(sql) { const st = bruto.prepare(sql); const stmt = { args: [], bind(...a) { stmt.args = a.map((x) => (x === undefined ? null : x)); return stmt; },
       async first() { const r = st.get(...stmt.args); return r == null ? null : { ...r }; }, async all() { return { results: st.all(...stmt.args).map((r) => ({ ...r })) }; },
       async run() { st.run(...stmt.args); return { success: true }; } }; return stmt; },
-    async exec(sql) { bruto.exec(sql); },
+    async batch(stmts) { const saida = []; for (const s of stmts) saida.push(await s.run()); return saida; },
   };
   const a = criarApp({ painel: '<p>painel</p>', esquema });
   const env = { DB: db, TOKEN: '', FUSO };
