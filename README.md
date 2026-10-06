@@ -126,7 +126,9 @@ mudo com "clique para ouvir", barra de progresso inteligente, botão de compra q
 "continuar de onde parou", sem controles de avanço e com eventos para pixels e retenção. É independente do
 app: são dois arquivos (`vsl-player.js` e `vsl-player.css`) para colar em qualquer página. Em
 [`player/analytics/`](player/analytics/README.md) há um servidor em Python, sem dependências, que recebe os
-dados do player e mostra o painel de retenção (`python player/analytics/servidor.py`).
+dados do player e mostra o painel de retenção (`python player/analytics/servidor.py`), e em
+[`player/analytics/cloudflare/`](player/analytics/cloudflare/README.md) a mesma coisa como Cloudflare Worker,
+publicável com um clique e sem servidor.
 
 ## Para desenvolvedores
 

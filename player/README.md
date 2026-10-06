@@ -237,6 +237,9 @@ chegada ao pitch, origens e dispositivos:
 python player/analytics/servidor.py --porta 8080 --token um-segredo
 ```
 
+Sem servidor próprio, use a versão para Cloudflare em [`analytics/cloudflare/`](analytics/cloudflare/README.md):
+um clique no botão "Deploy to Cloudflare" e o painel fica no ar de graça, com HTTPS.
+
 Se preferir o seu próprio backend, qualquer rota que aceite `POST` serve: leia o corpo como JSON (mesmo com
 `Content-Type: text/plain`), grave por (`player`, `visitor`, `session`) e responda com
 `Access-Control-Allow-Origin` para o domínio da página.

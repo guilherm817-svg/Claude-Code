@@ -4,6 +4,9 @@ Servidor que recebe os envios do `data-analytics` do player, guarda tudo num arq
 com curva de retenção, taxa de play, chegada ao pitch, origens e dispositivos. Só Python 3.10+ e biblioteca
 padrão: nada para instalar.
 
+> **Sem servidor próprio?** A pasta [`cloudflare/`](cloudflare/README.md) tem a mesma coisa rodando de graça
+> na Cloudflare, com um botão de "Deploy" de um clique e sem cartão. É o caminho mais fácil.
+
 ## Rodando
 
 ```bash

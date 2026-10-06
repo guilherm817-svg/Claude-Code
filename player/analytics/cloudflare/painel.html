@@ -1,0 +1,689 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Retenção do VSL</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --surface: #fcfcfb;
+      --page: #f9f9f7;
+      --ink: #0b0b0b;
+      --ink-2: #52514e;
+      --muted: #898781;
+      --grid: #e1e0d9;
+      --axis: #c3c2b7;
+      --border: rgba(11, 11, 11, 0.10);
+      --series-1: #2a78d6;
+      --series-2: #eb6834;
+      --wash: rgba(11, 11, 11, 0.04);
+      --good: #006300;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root:where(:not([data-theme="light"])) {
+        color-scheme: dark;
+        --surface: #1a1a19;
+        --page: #0d0d0d;
+        --ink: #ffffff;
+        --ink-2: #c3c2b7;
+        --muted: #898781;
+        --grid: #2c2c2a;
+        --axis: #383835;
+        --border: rgba(255, 255, 255, 0.10);
+        --series-1: #3987e5;
+        --series-2: #d95926;
+        --wash: rgba(255, 255, 255, 0.06);
+        --good: #0ca30c;
+      }
+    }
+    :root[data-theme="dark"] {
+      color-scheme: dark;
+      --surface: #1a1a19;
+      --page: #0d0d0d;
+      --ink: #ffffff;
+      --ink-2: #c3c2b7;
+      --muted: #898781;
+      --grid: #2c2c2a;
+      --axis: #383835;
+      --border: rgba(255, 255, 255, 0.10);
+      --series-1: #3987e5;
+      --series-2: #d95926;
+      --wash: rgba(255, 255, 255, 0.06);
+      --good: #0ca30c;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; }
+    body {
+      background: var(--page);
+      color: var(--ink);
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      font-size: 14px;
+      line-height: 1.45;
+      padding: 0 16px 48px;
+    }
+    main { max-width: 1120px; margin: 0 auto; }
+    h1 { font-size: 20px; margin: 24px 0 2px; }
+    .sub { color: var(--ink-2); margin: 0 0 16px; }
+    h2 { font-size: 15px; font-weight: 600; margin: 0; }
+    .legenda-texto { color: var(--ink-2); font-size: 13px; margin: 2px 0 0; }
+    a { color: var(--series-1); }
+    button, select, input { font: inherit; color: inherit; }
+
+    /* Filtros: uma linha, acima de tudo */
+    .filtros {
+      display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center;
+      padding: 10px 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+      margin-bottom: 16px; position: sticky; top: 8px; z-index: 5;
+    }
+    .periodos { display: flex; gap: 2px; background: var(--wash); border-radius: 8px; padding: 2px; }
+    .periodos button {
+      border: 0; background: transparent; padding: 6px 10px; border-radius: 6px; cursor: pointer; color: var(--ink-2);
+    }
+    .periodos button:hover { background: var(--border); }
+    .periodos button[aria-pressed="true"] { background: var(--surface); color: var(--ink); font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,.12); }
+    .personalizado { display: flex; gap: 6px; align-items: center; color: var(--ink-2); }
+    .filtros input[type="date"], .filtros select {
+      border: 1px solid var(--border); background: var(--surface); border-radius: 6px; padding: 5px 8px;
+    }
+    .filtros .direita { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+    .botao { border: 1px solid var(--border); background: var(--surface); border-radius: 6px; padding: 6px 10px; cursor: pointer; }
+    .botao:hover { background: var(--wash); }
+    .atualizado { color: var(--muted); font-size: 12px; }
+
+    /* Cartões */
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin: 0 0 16px; }
+    .card-topo { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+    figure.card { position: relative; }
+    .carregando { opacity: .55; transition: opacity .2s; }
+
+    /* Painel de números */
+    .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 16px; }
+    .tile { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; }
+    .tile .rotulo { color: var(--ink-2); font-size: 13px; }
+    .tile .valor { font-size: 30px; font-weight: 600; line-height: 1.15; margin: 4px 0 2px; }
+    .tile .detalhe { color: var(--muted); font-size: 12.5px; }
+
+    /* Gráficos */
+    svg { display: block; width: 100%; overflow: visible; }
+    svg text { font-family: inherit; font-size: 11.5px; fill: var(--muted); font-variant-numeric: tabular-nums; }
+    svg .grade { stroke: var(--grid); stroke-width: 1; }
+    svg .base { stroke: var(--axis); stroke-width: 1; }
+    svg .linha { fill: none; stroke: var(--series-1); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+    svg .area { fill: var(--series-1); opacity: .10; }
+    svg .ponto { fill: var(--series-1); stroke: var(--surface); stroke-width: 2; }
+    svg .marcador { stroke: var(--axis); stroke-width: 1; }
+    svg .rotulo-direto { fill: var(--ink-2); font-weight: 600; }
+    svg .cursor { stroke: var(--ink-2); stroke-width: 1; opacity: 0; }
+    svg .barra-1 { fill: var(--series-1); }
+    svg .barra-2 { fill: var(--series-2); }
+    svg .barra-1.destaque, svg .barra-2.destaque { filter: brightness(1.12); }
+    svg .alvo { fill: transparent; }
+    svg .alvo:hover, svg .alvo:focus { fill: var(--wash); outline: none; }
+    svg:focus { outline: 2px solid var(--series-1); outline-offset: 2px; border-radius: 4px; }
+    .dica {
+      position: absolute; pointer-events: none; background: var(--surface); border: 1px solid var(--border);
+      border-radius: 8px; padding: 8px 10px; box-shadow: 0 6px 20px rgba(0,0,0,.15); font-size: 12.5px; min-width: 120px;
+      opacity: 0; transition: opacity .1s; z-index: 3;
+    }
+    .dica.on { opacity: 1; }
+    .dica .quando { color: var(--muted); margin-bottom: 4px; }
+    .dica .linha-dica { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+    .dica .chave { width: 14px; height: 2px; border-radius: 1px; flex: none; }
+    .dica .chave.quadro { height: 10px; border-radius: 2px; }
+    .dica strong { font-weight: 600; }
+    .legenda { display: flex; gap: 16px; flex-wrap: wrap; color: var(--ink-2); font-size: 12.5px; margin: 0 0 8px; }
+    .legenda span { display: inline-flex; align-items: center; gap: 6px; }
+    .legenda i { display: inline-block; width: 12px; height: 12px; border-radius: 2px; }
+
+    /* Tabelas */
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--grid); }
+    th { color: var(--ink-2); font-weight: 600; font-size: 12.5px; }
+    td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .rolavel { overflow-x: auto; }
+    tr:last-child td { border-bottom: 0; }
+    .tabela-vista { display: none; margin-top: 8px; max-height: 320px; overflow: auto; }
+    figure.card.modo-tabela .tabela-vista { display: block; }
+    figure.card.modo-tabela .grafico { display: none; }
+    .grade-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+    .grade-2 .card { margin: 0; }
+
+    .vazio { text-align: center; padding: 40px 16px; }
+    .vazio code, .vazio pre { background: var(--wash); border-radius: 6px; padding: 2px 6px; font-size: 12.5px; }
+    .vazio pre { text-align: left; padding: 12px; overflow: auto; }
+    .oculto { display: none !important; }
+    .token { display: flex; gap: 8px; justify-content: center; margin-top: 12px; }
+    .token input { border: 1px solid var(--border); background: var(--surface); border-radius: 6px; padding: 6px 8px; width: 240px; }
+    .erro { color: #d03b3b; }
+    @media (max-width: 640px) {
+      .filtros { position: static; }
+      .tile .valor { font-size: 26px; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Retenção do VSL</h1>
+  <p class="sub">Quantas pessoas abriram a página, clicaram para ouvir, chegaram ao pitch e até onde assistiram.</p>
+
+  <div class="filtros" id="filtros">
+    <div class="periodos" role="group" aria-label="Período">
+      <button type="button" data-periodo="hoje">Hoje</button>
+      <button type="button" data-periodo="7">7 dias</button>
+      <button type="button" data-periodo="30" aria-pressed="true">30 dias</button>
+      <button type="button" data-periodo="90">90 dias</button>
+      <button type="button" data-periodo="tudo">Tudo</button>
+    </div>
+    <div class="personalizado">
+      <label>de <input type="date" id="de"></label>
+      <label>até <input type="date" id="ate"></label>
+      <button type="button" class="botao" id="aplicar">Aplicar</button>
+    </div>
+    <select id="player" aria-label="Player"><option value="">Todos os players</option></select>
+    <div class="direita">
+      <span class="atualizado" id="atualizado"></span>
+      <a class="botao" id="csv" href="#">Exportar CSV</a>
+      <button type="button" class="botao" id="recarregar">Atualizar</button>
+    </div>
+  </div>
+
+  <div id="pedir-token" class="card vazio oculto">
+    <h2>Este painel pede um token</h2>
+    <p class="legenda-texto">Informe o valor passado em <code>--token</code> ao iniciar o servidor.</p>
+    <form class="token" id="form-token">
+      <input type="password" id="campo-token" placeholder="token" autocomplete="off">
+      <button type="submit" class="botao">Entrar</button>
+    </form>
+    <p id="erro-token" class="erro oculto">Token inválido.</p>
+  </div>
+
+  <div id="conteudo" class="oculto">
+    <section class="kpis" id="kpis"></section>
+
+    <figure class="card" id="fig-retencao">
+      <div class="card-topo">
+        <div>
+          <h2>Curva de retenção</h2>
+          <p class="legenda-texto" id="retencao-sub">Porcentagem dos plays que ainda assistiam em cada momento do vídeo.</p>
+        </div>
+        <button type="button" class="botao" data-tabela="fig-retencao">Ver tabela</button>
+      </div>
+      <div class="grafico" id="retencao-grafico"></div>
+      <div class="tabela-vista" id="retencao-tabela"></div>
+      <div class="dica" id="dica-retencao"></div>
+    </figure>
+
+    <figure class="card" id="fig-dias">
+      <div class="card-topo">
+        <div>
+          <h2>Visualizações e plays por dia</h2>
+          <div class="legenda"><span><i style="background: var(--series-1)"></i>Visualizações</span><span><i style="background: var(--series-2)"></i>Plays (com som)</span></div>
+        </div>
+        <button type="button" class="botao" data-tabela="fig-dias">Ver tabela</button>
+      </div>
+      <div class="grafico" id="dias-grafico"></div>
+      <div class="tabela-vista" id="dias-tabela"></div>
+      <div class="dica" id="dica-dias"></div>
+    </figure>
+
+    <div class="grade-2">
+      <div class="card"><h2>Origens</h2><p class="legenda-texto">utm_source, ou o site de onde a pessoa veio.</p><div id="origens" class="rolavel"></div></div>
+      <div class="card"><h2>Dispositivos</h2><p class="legenda-texto">Pelo navegador do visitante.</p><div id="dispositivos" class="rolavel"></div></div>
+    </div>
+    <div class="card" style="margin-top: 16px"><h2>Eventos</h2><p class="legenda-texto">Tudo o que o player registrou no período, inclusive eventos seus (<code>player.emit('cta_click')</code>).</p><div id="eventos" class="rolavel"></div></div>
+  </div>
+
+  <div id="vazio" class="card vazio oculto">
+    <h2>Nenhum envio ainda</h2>
+    <p class="legenda-texto">Aponte o player para este servidor e os números aparecem aqui assim que alguém abrir a página.</p>
+    <pre id="snippet"></pre>
+    <p class="legenda-texto">Se este servidor estiver atrás de um domínio com HTTPS, use esse endereço no lugar.</p>
+  </div>
+</main>
+
+<script>
+(() => {
+  'use strict';
+
+  // ---------------------------------------------------------------- utilidades
+  const $ = (sel) => document.querySelector(sel);
+  const fmtN = new Intl.NumberFormat('pt-BR');
+  const fmtPct = (x, casas) => (x * 100).toLocaleString('pt-BR', { maximumFractionDigits: casas == null ? 1 : casas }) + '%';
+  const fmtTempo = (s) => {
+    s = Math.max(0, Math.round(s));
+    const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), r = s % 60;
+    return (h ? h + ':' + String(m).padStart(2, '0') : String(m)) + ':' + String(r).padStart(2, '0');
+  };
+  const fmtDia = (iso) => iso.slice(8, 10) + '/' + iso.slice(5, 7);
+  const svgEl = (tag, attrs, pai) => {
+    const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+    Object.entries(attrs || {}).forEach(([k, v]) => el.setAttribute(k, v));
+    if (pai) pai.appendChild(el);
+    return el;
+  };
+  const texto = (tag, conteudo, attrs) => {
+    const el = document.createElement(tag);
+    el.textContent = conteudo;
+    Object.entries(attrs || {}).forEach(([k, v]) => el.setAttribute(k, v));
+    return el;
+  };
+  const ticksBonitos = (max, qtd) => {
+    if (max <= 0) return [0];
+    const bruto = max / qtd;
+    const pot = Math.max(1, Math.pow(10, Math.floor(Math.log10(bruto))));
+    const passo = [1, 2, 2.5, 5, 10].filter((m) => pot >= 10 || m !== 2.5).map((m) => m * pot).find((p) => max / p <= qtd) || pot * 10;
+    const ticks = [];
+    for (let v = 0; v <= max + 1e-9; v += passo) ticks.push(Math.round(v * 1000) / 1000);
+    if (ticks[ticks.length - 1] < max) ticks.push(ticks[ticks.length - 1] + passo);
+    return ticks;
+  };
+  const NOMES_EVENTOS = {
+    ready: 'Carregou', autoplay: 'Autoplay (mudo)', autoplay_blocked: 'Autoplay bloqueado pelo aparelho',
+    unmute: 'Clique para ouvir (play)', play: 'Play / retomada', pause: 'Pausa', ended: 'Terminou o vídeo',
+    replay: 'Assistiu de novo', milestone: 'Marcos de 10 a 100 %', pitch: 'Evento pitch (1× por visitante, conta o mudo)', reach: 'Elemento liberado',
+    resume_prompt: 'Viu a pergunta de retomar', resume_continue: 'Continuou de onde parou', resume_restart: 'Começou do início',
+    seek_blocked: 'Tentou pular', fullscreen: 'Tela cheia', error: 'Erro ao carregar',
+  };
+
+  // ---------------------------------------------------------------- estado e API
+  const estado = { periodo: '30', de: '', ate: '', player: '' };
+  try { Object.assign(estado, JSON.parse(sessionStorage.getItem('vsl-painel') || '{}')); } catch (e) { /* ignora */ }
+  const urlToken = new URLSearchParams(location.search).get('token');
+  if (urlToken) { try { sessionStorage.setItem('vsl-token', urlToken); } catch (e) { /* ignora */ } history.replaceState(null, '', location.pathname); }
+  const token = () => { try { return sessionStorage.getItem('vsl-token') || ''; } catch (e) { return ''; } };
+
+  async function api(caminho, params) {
+    const url = new URL(caminho, location.href);
+    Object.entries(params || {}).forEach(([k, v]) => { if (v) url.searchParams.set(k, v); });
+    const resp = await fetch(url, { headers: token() ? { 'X-Token': token() } : {} });
+    if (resp.status === 401) throw Object.assign(new Error('token'), { token: true });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    return resp.json();
+  }
+
+  // Os períodos prontos (hoje, 7, 30, 90 dias) são calculados pelo servidor, com o relógio dele, que é o
+  // mesmo que carimba as sessões. Só o período personalizado manda datas.
+  function filtros() {
+    if (estado.periodo === 'custom') return { de: estado.de, ate: estado.ate };
+    return { periodo: estado.periodo };
+  }
+
+  let ultimo = null;
+  let timer = null;
+  let pedeToken = null; // null = ainda não perguntou ao servidor
+  let pedido = 0;       // número do último carregar(): respostas atrasadas de pedidos antigos são ignoradas
+  const escrito = { de: '', ate: '' }; // último valor que o painel escreveu nos campos de data
+
+  function preencherDatas(de, ate) {
+    [['#de', de || ''], ['#ate', ate || '']].forEach(([sel, valor]) => {
+      const campo = $(sel);
+      const chave = sel.slice(1);
+      // não sobrescreve o que a pessoa está digitando
+      if (document.activeElement !== campo && campo.value === escrito[chave]) { campo.value = valor; escrito[chave] = valor; }
+    });
+  }
+
+  async function carregar() {
+    const meu = ++pedido;
+    if (pedeToken === null) {
+      try { pedeToken = (await api('api/config')).token; } catch (e) { pedeToken = false; }
+    }
+    if (pedeToken && !token()) {
+      $('#conteudo').classList.add('oculto'); $('#vazio').classList.add('oculto');
+      $('#pedir-token').classList.remove('oculto'); $('#erro-token').classList.add('oculto');
+      return;
+    }
+    try { sessionStorage.setItem('vsl-painel', JSON.stringify(estado)); } catch (e) { /* ignora */ }
+    document.querySelectorAll('.periodos button').forEach((b) => b.setAttribute('aria-pressed', b.dataset.periodo === estado.periodo ? 'true' : 'false'));
+    $('#conteudo').classList.add('carregando');
+    try {
+      const [players, resumo] = await Promise.all([api('api/players'), api('api/resumo', Object.assign({ player: estado.player }, filtros()))]);
+      if (meu !== pedido) return; // chegou um pedido mais novo enquanto este esperava
+      $('#pedir-token').classList.add('oculto');
+      if (!preencherPlayers(players.players)) { carregar(); return; } // o player filtrado sumiu: recarrega sem filtro
+      ultimo = resumo;
+      preencherDatas(resumo.de, resumo.ate);
+      render(resumo, players.players);
+      $('#atualizado').textContent = 'atualizado às ' + new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    } catch (erro) {
+      if (meu !== pedido) return;
+      if (erro.token) {
+        $('#conteudo').classList.add('oculto'); $('#vazio').classList.add('oculto');
+        $('#pedir-token').classList.remove('oculto');
+        $('#erro-token').classList.toggle('oculto', !token());
+      } else {
+        $('#atualizado').textContent = 'erro ao carregar: ' + erro.message;
+      }
+    } finally {
+      if (meu === pedido) $('#conteudo').classList.remove('carregando');
+    }
+  }
+
+  // Devolve false quando o player filtrado não existe mais (o chamador recarrega sem filtro).
+  function preencherPlayers(lista) {
+    const sel = $('#player');
+    sel.replaceChildren(texto('option', 'Todos os players', { value: '' }));
+    lista.forEach((p) => sel.appendChild(texto('option', p.player + ' (' + fmtN.format(p.sessoes) + ')', { value: p.player })));
+    if (estado.player && !lista.some((p) => p.player === estado.player)) { estado.player = ''; return false; }
+    sel.value = estado.player;
+    return true;
+  }
+
+  // CSV: baixa com o token no cabeçalho, para ele não ir parar na URL nem no histórico.
+  async function baixarCsv() {
+    const url = new URL('api/sessoes.csv', location.href);
+    Object.entries(Object.assign({ player: estado.player }, filtros())).forEach(([k, v]) => { if (v) url.searchParams.set(k, v); });
+    const resp = await fetch(url, { headers: token() ? { 'X-Token': token() } : {} });
+    if (!resp.ok) { $('#atualizado').textContent = 'erro ao exportar: HTTP ' + resp.status; return; }
+    const blob = await resp.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'sessoes-' + (estado.player || 'todos').replace(/[^A-Za-z0-9._-]+/g, '_') + '.csv';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+  }
+
+  // ---------------------------------------------------------------- renderização
+  function render(r, players) {
+    const vazio = !(players || []).some((p) => p.sessoes > 0);
+    $('#vazio').classList.toggle('oculto', !vazio);
+    $('#conteudo').classList.toggle('oculto', vazio);
+    if (vazio) {
+      $('#snippet').textContent = '<div class="vsl-player"\n     data-src="https://seu-cdn.com/vsl.mp4"\n     data-analytics="' + location.origin + '/vsl"></div>';
+      return;
+    }
+    renderKpis(r);
+    renderRetencao(r);
+    renderDias(r);
+    renderGrupos('#origens', r.origens, 'Origem');
+    renderGrupos('#dispositivos', r.dispositivos, 'Dispositivo');
+    renderEventos(r.eventos);
+  }
+
+  function tile(rotulo, valor, detalhe) {
+    const el = document.createElement('div');
+    el.className = 'tile';
+    el.appendChild(texto('div', rotulo, { class: 'rotulo' }));
+    el.appendChild(texto('div', valor, { class: 'valor' }));
+    el.appendChild(texto('div', detalhe || '', { class: 'detalhe' }));
+    return el;
+  }
+
+  function renderKpis(r) {
+    const temPitch = r.pitch != null || r.pitch_misto;
+    const pitchTxt = r.pitch != null ? 'pitch aos ' + fmtTempo(r.pitch) : r.pitch_misto ? 'pitch de cada player' : 'sem data-pitch no player';
+    $('#kpis').replaceChildren(
+      tile('Visualizações da página', fmtN.format(r.sessoes), fmtN.format(r.visitantes) + ' visitantes únicos'),
+      tile('Plays (clicaram para ouvir)', fmtN.format(r.plays), 'taxa de play ' + fmtPct(r.taxa_play)),
+      tile('Chegaram ao pitch', temPitch ? fmtN.format(r.chegaram_pitch) : '—', (temPitch ? fmtPct(r.taxa_pitch) + ' dos plays · ' : '') + pitchTxt),
+      tile('Terminaram o vídeo', fmtN.format(r.terminaram), fmtPct(r.taxa_conclusao) + ' dos plays'),
+      tile('Tempo médio assistido', fmtTempo(r.tempo_medio), 'mediana ' + fmtTempo(r.tempo_mediano) + ' · ' + fmtPct(r.engajamento, 0) + ' do vídeo'),
+      tile('Duração do vídeo', r.duracao ? fmtTempo(r.duracao) : '—', 'informada pelo player'),
+    );
+  }
+
+  // Curva de retenção: área de uma série, marcador do pitch, cruz de leitura e tabela por minuto.
+  function renderRetencao(r) {
+    const alvo = $('#retencao-grafico');
+    const dica = $('#dica-retencao');
+    const pontos = r.retencao.pontos;
+    const passo = r.retencao.passo;
+    const plays = r.plays;
+    dica.classList.remove('on');
+    alvo.replaceChildren();
+    $('#retencao-sub').textContent = plays
+      ? 'Porcentagem dos ' + fmtN.format(plays) + ' plays que ainda assistiam em cada momento do vídeo.'
+      : 'Ainda não houve plays com som neste período.';
+    if (!plays || pontos.length < 2) { alvo.appendChild(texto('p', 'Sem dados para desenhar.', { class: 'legenda-texto' })); $('#retencao-tabela').replaceChildren(); return; }
+
+    const W = Math.max(320, alvo.clientWidth || 800), H = 280;
+    const m = { top: 24, right: 56, bottom: 30, left: 40 };
+    const pw = W - m.left - m.right, ph = H - m.top - m.bottom;
+    const duracao = (pontos.length - 1) * passo;
+    const x = (s) => m.left + (duracao ? s / duracao : 0) * pw;
+    const y = (p) => m.top + (1 - p) * ph;
+    const pct = (i) => Math.min(1, pontos[i] / plays);
+    const svg = svgEl('svg', { viewBox: '0 0 ' + W + ' ' + H, height: H, role: 'img', tabindex: '0',
+      'aria-label': 'Curva de retenção: ' + pontos.length + ' pontos, de 0 até ' + fmtTempo(duracao) });
+
+    [0, 0.25, 0.5, 0.75, 1].forEach((p) => {
+      svgEl('line', { x1: m.left, x2: W - m.right, y1: y(p), y2: y(p), class: p === 0 ? 'base' : 'grade' }, svg);
+      svgEl('text', { x: m.left - 8, y: y(p) + 4, 'text-anchor': 'end' }, svg).textContent = Math.round(p * 100) + '%';
+    });
+    const passoX = [15, 30, 60, 120, 300, 600, 900, 1800, 3600].find((p) => duracao / p <= 8) || 7200;
+    for (let s = 0; s <= duracao; s += passoX) {
+      svgEl('text', { x: x(s), y: H - m.bottom + 18, 'text-anchor': s === 0 ? 'start' : 'middle' }, svg).textContent = fmtTempo(s);
+    }
+
+    const coords = pontos.map((_, i) => [x(i * passo), y(pct(i))]);
+    const linha = coords.map((c, i) => (i ? 'L' : 'M') + c[0].toFixed(1) + ' ' + c[1].toFixed(1)).join(' ');
+    svgEl('path', { d: linha + ' L' + coords[coords.length - 1][0].toFixed(1) + ' ' + y(0) + ' L' + m.left + ' ' + y(0) + ' Z', class: 'area' }, svg);
+    svgEl('path', { d: linha, class: 'linha' }, svg);
+
+    if (r.pitch != null && r.pitch <= duracao) {
+      const i = Math.min(pontos.length - 1, Math.round(r.pitch / passo));
+      svgEl('line', { x1: x(r.pitch), x2: x(r.pitch), y1: m.top - 6, y2: y(0), class: 'marcador' }, svg);
+      svgEl('text', { x: x(r.pitch) + 5, y: m.top - 8, class: 'rotulo-direto' }, svg).textContent = 'Pitch ' + fmtTempo(r.pitch) + ' · ' + fmtPct(pct(i), 0);
+      svgEl('circle', { cx: x(i * passo), cy: y(pct(i)), r: 4, class: 'ponto' }, svg);
+    }
+    const fim = coords[coords.length - 1];
+    svgEl('circle', { cx: fim[0], cy: fim[1], r: 4, class: 'ponto' }, svg);
+    svgEl('text', { x: fim[0] + 8, y: fim[1] + 4, class: 'rotulo-direto' }, svg).textContent = fmtPct(pct(pontos.length - 1), 0);
+
+    const cursor = svgEl('line', { y1: m.top, y2: y(0), class: 'cursor' }, svg);
+    const bolinha = svgEl('circle', { r: 5, class: 'ponto', opacity: 0 }, svg);
+    const area = svgEl('rect', { x: m.left, y: m.top, width: pw, height: ph, fill: 'transparent' }, svg);
+    alvo.appendChild(svg);
+
+    let indice = -1;
+    const mostrar = (i) => {
+      indice = Math.max(0, Math.min(pontos.length - 1, i));
+      const [cx, cy] = coords[indice];
+      cursor.setAttribute('x1', cx); cursor.setAttribute('x2', cx); cursor.setAttribute('opacity', 1);
+      bolinha.setAttribute('cx', cx); bolinha.setAttribute('cy', cy); bolinha.setAttribute('opacity', 1);
+      dica.replaceChildren(texto('div', 'aos ' + fmtTempo(indice * passo), { class: 'quando' }));
+      const l = document.createElement('div'); l.className = 'linha-dica';
+      l.appendChild(texto('span', '', { class: 'chave', style: 'background: var(--series-1)' }));
+      l.appendChild(texto('strong', fmtPct(pct(indice))));
+      l.appendChild(texto('span', fmtN.format(Math.round(pontos[indice])) + ' de ' + fmtN.format(plays) + ' plays'));
+      dica.appendChild(l);
+      dica.classList.add('on');
+      const caixa = alvo.getBoundingClientRect();
+      const px = cx / W * caixa.width;
+      dica.style.left = Math.min(caixa.width - dica.offsetWidth - 4, Math.max(4, px + 12)) + 'px';
+      dica.style.top = (alvo.offsetTop + cy / H * caixa.height - dica.offsetHeight - 12) + 'px';
+    };
+    const esconder = () => { cursor.setAttribute('opacity', 0); bolinha.setAttribute('opacity', 0); dica.classList.remove('on'); };
+    const seguir = (e) => {
+      const caixa = svg.getBoundingClientRect();
+      const sx = (e.clientX - caixa.left) / caixa.width * W;
+      mostrar(Math.round((sx - m.left) / pw * (pontos.length - 1)));
+    };
+    area.addEventListener('pointermove', seguir);
+    area.addEventListener('pointerenter', seguir);
+    area.addEventListener('pointerleave', esconder);
+    svg.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowRight') { e.preventDefault(); mostrar((indice < 0 ? 0 : indice) + Math.max(1, Math.round(pontos.length / 60))); }
+      else if (e.key === 'ArrowLeft') { e.preventDefault(); mostrar((indice < 0 ? pontos.length - 1 : indice) - Math.max(1, Math.round(pontos.length / 60))); }
+      else if (e.key === 'Escape') esconder();
+    });
+    svg.addEventListener('blur', esconder);
+
+    // Tabela por minuto (ou por bloco, se o vídeo for curto)
+    const tabela = document.createElement('table');
+    const cab = tabela.createTHead().insertRow();
+    ['Momento', 'Ainda assistindo', 'Plays'].forEach((h, i) => cab.appendChild(texto('th', h, i ? { class: 'num' } : {})));
+    const corpo = tabela.createTBody();
+    const passoTab = duracao >= 600 ? 60 : duracao >= 120 ? 30 : 10;
+    for (let s = 0; s <= duracao; s += passoTab) {
+      const i = Math.min(pontos.length - 1, Math.round(s / passo));
+      const tr = corpo.insertRow();
+      tr.appendChild(texto('td', fmtTempo(s)));
+      tr.appendChild(texto('td', fmtPct(pct(i)), { class: 'num' }));
+      tr.appendChild(texto('td', fmtN.format(Math.round(pontos[i])), { class: 'num' }));
+    }
+    $('#retencao-tabela').replaceChildren(tabela);
+  }
+
+  // Colunas por dia: duas séries (visualizações e plays), finas, com folga de 2px e topo arredondado.
+  function renderDias(r) {
+    const alvo = $('#dias-grafico');
+    const dica = $('#dica-dias');
+    const dias = r.por_dia;
+    dica.classList.remove('on');
+    alvo.replaceChildren();
+    if (!dias.length) { alvo.appendChild(texto('p', 'Sem dados no período.', { class: 'legenda-texto' })); $('#dias-tabela').replaceChildren(); return; }
+
+    const W = Math.max(320, alvo.clientWidth || 800), H = 220;
+    const m = { top: 12, right: 12, bottom: 28, left: 44 };
+    const pw = W - m.left - m.right, ph = H - m.top - m.bottom;
+    const max = Math.max(1, ...dias.map((d) => d.sessoes));
+    const ticks = ticksBonitos(max, 4);
+    const topo = ticks[ticks.length - 1];
+    const y = (v) => m.top + (1 - v / topo) * ph;
+    const banda = pw / dias.length;
+    const ladoALado = banda >= 8; // duas colunas por dia só quando cabem com folga de 2px entre elas
+    const largura = ladoALado ? Math.min(24, (banda - 3) / 2) : Math.max(1, banda - 1);
+    const svg = svgEl('svg', { viewBox: '0 0 ' + W + ' ' + H, height: H, role: 'img', 'aria-label': 'Visualizações e plays por dia' });
+
+    ticks.forEach((t) => {
+      svgEl('line', { x1: m.left, x2: W - m.right, y1: y(t), y2: y(t), class: t === 0 ? 'base' : 'grade' }, svg);
+      svgEl('text', { x: m.left - 8, y: y(t) + 4, 'text-anchor': 'end' }, svg).textContent = fmtN.format(t);
+    });
+    const cadaRotulo = Math.ceil(dias.length / Math.max(2, Math.floor(pw / 64)));
+    const coluna = (cx, v, classe) => {
+      const h = Math.max(0, y(0) - y(v));
+      if (h <= 0) return;
+      const raio = Math.min(4, largura / 2, h);
+      const x0 = cx - largura / 2, x1 = cx + largura / 2, y0 = y(v), y1 = y(0);
+      svgEl('path', { class: classe, d: 'M' + x0 + ' ' + y1 + ' L' + x0 + ' ' + (y0 + raio) + ' Q' + x0 + ' ' + y0 + ' ' + (x0 + raio) + ' ' + y0 +
+        ' L' + (x1 - raio) + ' ' + y0 + ' Q' + x1 + ' ' + y0 + ' ' + x1 + ' ' + (y0 + raio) + ' L' + x1 + ' ' + y1 + ' Z' }, svg);
+    };
+    dias.forEach((d, i) => {
+      const cx = m.left + banda * (i + 0.5);
+      if (ladoALado) {
+        coluna(cx - largura / 2 - 1, d.sessoes, 'barra-1');
+        coluna(cx + largura / 2 + 1, d.plays, 'barra-2');
+      } else {
+        coluna(cx, d.sessoes, 'barra-1'); // com muitos dias, os plays ficam sobrepostos às visualizações
+        coluna(cx, d.plays, 'barra-2');
+      }
+      if (i % cadaRotulo === 0 || i === dias.length - 1) {
+        svgEl('text', { x: cx, y: H - m.bottom + 18, 'text-anchor': 'middle' }, svg).textContent = fmtDia(d.dia);
+      }
+    });
+    dias.forEach((d, i) => {
+      const hit = svgEl('rect', { x: m.left + banda * i, y: m.top, width: banda, height: ph, class: 'alvo', tabindex: '0',
+        'aria-label': fmtDia(d.dia) + ': ' + d.sessoes + ' visualizações, ' + d.plays + ' plays' }, svg);
+      const mostrar = () => {
+        dica.replaceChildren(texto('div', new Date(d.dia + 'T12:00:00').toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: 'short' }), { class: 'quando' }));
+        [['Visualizações', d.sessoes, 'var(--series-1)'], ['Plays', d.plays, 'var(--series-2)']].forEach(([nome, v, cor]) => {
+          const l = document.createElement('div'); l.className = 'linha-dica';
+          l.appendChild(texto('span', '', { class: 'chave quadro', style: 'background: ' + cor }));
+          l.appendChild(texto('strong', fmtN.format(v)));
+          l.appendChild(texto('span', nome));
+          dica.appendChild(l);
+        });
+        const taxa = document.createElement('div'); taxa.className = 'linha-dica';
+        taxa.appendChild(texto('span', 'taxa de play ' + (d.sessoes ? fmtPct(d.plays / d.sessoes) : '—'), { class: 'quando' }));
+        dica.appendChild(taxa);
+        dica.classList.add('on');
+        const caixa = alvo.getBoundingClientRect();
+        const px = (m.left + banda * (i + 0.5)) / W * caixa.width;
+        dica.style.left = Math.min(caixa.width - dica.offsetWidth - 4, Math.max(4, px - dica.offsetWidth / 2)) + 'px';
+        dica.style.top = (alvo.offsetTop - dica.offsetHeight + 8) + 'px';
+      };
+      const esconder = () => dica.classList.remove('on');
+      hit.addEventListener('pointerenter', mostrar);
+      hit.addEventListener('focus', mostrar);
+      hit.addEventListener('pointerleave', esconder);
+      hit.addEventListener('blur', esconder);
+    });
+    alvo.appendChild(svg);
+
+    const tabela = document.createElement('table');
+    const cab = tabela.createTHead().insertRow();
+    ['Dia', 'Visualizações', 'Plays', 'Taxa de play'].forEach((h, i) => cab.appendChild(texto('th', h, i ? { class: 'num' } : {})));
+    const corpo = tabela.createTBody();
+    dias.slice().reverse().forEach((d) => {
+      const tr = corpo.insertRow();
+      tr.appendChild(texto('td', fmtDia(d.dia) + '/' + d.dia.slice(0, 4)));
+      tr.appendChild(texto('td', fmtN.format(d.sessoes), { class: 'num' }));
+      tr.appendChild(texto('td', fmtN.format(d.plays), { class: 'num' }));
+      tr.appendChild(texto('td', d.sessoes ? fmtPct(d.plays / d.sessoes) : '—', { class: 'num' }));
+    });
+    $('#dias-tabela').replaceChildren(tabela);
+  }
+
+  function renderGrupos(sel, grupos, titulo) {
+    const tabela = document.createElement('table');
+    const cab = tabela.createTHead().insertRow();
+    [titulo, 'Visualizações', 'Plays', 'Taxa de play', 'Pitch', 'Terminaram'].forEach((h, i) => cab.appendChild(texto('th', h, i ? { class: 'num' } : {})));
+    const corpo = tabela.createTBody();
+    grupos.forEach((g) => {
+      const tr = corpo.insertRow();
+      tr.appendChild(texto('td', g.nome));
+      tr.appendChild(texto('td', fmtN.format(g.sessoes), { class: 'num' }));
+      tr.appendChild(texto('td', fmtN.format(g.plays), { class: 'num' }));
+      tr.appendChild(texto('td', g.sessoes ? fmtPct(g.plays / g.sessoes) : '—', { class: 'num' }));
+      tr.appendChild(texto('td', g.plays ? fmtN.format(g.pitch) + ' (' + fmtPct(g.pitch / g.plays, 0) + ')' : '—', { class: 'num' }));
+      tr.appendChild(texto('td', g.plays ? fmtN.format(g.terminaram) + ' (' + fmtPct(g.terminaram / g.plays, 0) + ')' : '—', { class: 'num' }));
+    });
+    $(sel).replaceChildren(grupos.length ? tabela : texto('p', 'Sem dados no período.', { class: 'legenda-texto' }));
+  }
+
+  function renderEventos(eventos) {
+    const tabela = document.createElement('table');
+    const cab = tabela.createTHead().insertRow();
+    ['Evento', 'Código', 'Vezes', 'Sessões'].forEach((h, i) => cab.appendChild(texto('th', h, i > 1 ? { class: 'num' } : {})));
+    const corpo = tabela.createTBody();
+    eventos.forEach((e) => {
+      const tr = corpo.insertRow();
+      tr.appendChild(texto('td', Object.hasOwn(NOMES_EVENTOS, e.tipo) ? NOMES_EVENTOS[e.tipo] : 'Evento seu'));
+      tr.appendChild(texto('td', e.tipo));
+      tr.appendChild(texto('td', fmtN.format(e.total), { class: 'num' }));
+      tr.appendChild(texto('td', fmtN.format(e.sessoes), { class: 'num' }));
+    });
+    $('#eventos').replaceChildren(eventos.length ? tabela : texto('p', 'Sem eventos no período.', { class: 'legenda-texto' }));
+  }
+
+  // ---------------------------------------------------------------- controles
+  document.querySelectorAll('.periodos button').forEach((b) => b.addEventListener('click', () => {
+    estado.periodo = b.dataset.periodo;
+    escrito.de = $('#de').value; escrito.ate = $('#ate').value; // libera os campos para receberem as datas do período
+    carregar();
+  }));
+  $('#aplicar').addEventListener('click', () => {
+    if (!$('#de').value && !$('#ate').value) return;
+    estado.periodo = 'custom'; estado.de = $('#de').value; estado.ate = $('#ate').value;
+    escrito.de = estado.de; escrito.ate = estado.ate;
+    carregar();
+  });
+  $('#csv').addEventListener('click', (e) => { e.preventDefault(); baixarCsv(); });
+  $('#player').addEventListener('change', (e) => { estado.player = e.target.value; carregar(); });
+  $('#recarregar').addEventListener('click', carregar);
+  document.querySelectorAll('[data-tabela]').forEach((b) => b.addEventListener('click', () => {
+    const fig = document.getElementById(b.dataset.tabela);
+    const modo = fig.classList.toggle('modo-tabela');
+    b.textContent = modo ? 'Ver gráfico' : 'Ver tabela';
+  }));
+  $('#form-token').addEventListener('submit', (e) => {
+    e.preventDefault();
+    try { sessionStorage.setItem('vsl-token', $('#campo-token').value.trim()); } catch (err) { /* ignora */ }
+    carregar();
+  });
+  let redesenho = null;
+  new ResizeObserver(() => {
+    clearTimeout(redesenho);
+    redesenho = setTimeout(() => { if (ultimo) { renderRetencao(ultimo); renderDias(ultimo); } }, 150);
+  }).observe($('#conteudo'));
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') carregar(); });
+  timer = setInterval(() => { if (document.visibilityState === 'visible') carregar(); }, 60000);
+
+  carregar();
+})();
+</script>
+</body>
+</html>

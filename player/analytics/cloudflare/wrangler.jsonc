@@ -1,0 +1,19 @@
+// Configuração do Worker de analytics do VSL Player.
+// O banco D1 é criado automaticamente no primeiro deploy (botão "Deploy to Cloudflare" ou `npm run deploy`).
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "vsl-analytics",
+  "main": "src/index.js",
+  "compatibility_date": "2026-09-01",
+  "rules": [{ "type": "Text", "globs": ["**/*.html"] }],
+  "vars": {
+    // Fuso usado para agrupar as sessões por dia e para os períodos "hoje", "7 dias" etc.
+    "FUSO": "America/Sao_Paulo"
+  },
+  // Variáveis definidas no painel da Cloudflare (ex.: o segredo TOKEN) não são apagadas por um novo deploy.
+  "keep_vars": true,
+  "d1_databases": [
+    { "binding": "DB", "database_name": "vsl-analytics", "migrations_dir": "migrations" }
+  ],
+  "observability": { "enabled": true }
+}

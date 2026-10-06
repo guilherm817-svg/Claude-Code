@@ -1,0 +1,20 @@
+{
+  "name": "vsl-analytics",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Analytics do VSL Player em um Cloudflare Worker com banco D1",
+  "scripts": {
+    "deploy": "wrangler deploy && wrangler d1 migrations apply DB --remote",
+    "dev": "wrangler d1 migrations apply DB --local && wrangler dev",
+    "test": "node --test teste/worker.test.js"
+  },
+  "devDependencies": {
+    "wrangler": "^4.147.0"
+  },
+  "cloudflare": {
+    "bindings": {
+      "DB": { "description": "Banco D1 onde ficam as sessões e os eventos do player" }
+    }
+  }
+}
