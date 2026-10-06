@@ -135,6 +135,40 @@ def _rms_db(audio: np.ndarray, taxa: int, janela_s: float = 0.02, passo_s: float
     return 20 * np.log10(rms + 1e-9), janela, passo
 
 
+# A fala é procurada em duas faixas de frequência, cada uma comparada com o ruído de fundo dela mesma: a da voz
+# (vogais e nasais) e a do chiado (s, f, x, ch). O som de ambiente se concentra nos graves e quase não tem
+# chiado, então um "s" fraco no começo ou no fim da frase aparece na segunda faixa mesmo quando some no total.
+FAIXAS_FALA = ((200, 3500), (3500, 8000))  # Hz
+PAUSA_DENTRO_DA_FALA = 0.3  # s: sons separados por pausas menores que isto fazem parte da mesma fala
+PALAVRA_FRACA = 0.2  # s: som contínuo, mesmo baixo, que dura isto conta como fala
+
+
+def _energia_por_faixa(audio: np.ndarray, taxa: int, janela_s: float = 0.02,
+                       passo_s: float = 0.01) -> tuple[np.ndarray, int, int]:
+    """Energia em dBFS de cada trecho de 20 ms, a cada 10 ms, em cada faixa de FAIXAS_FALA: (faixas, trechos)."""
+    janela, passo = int(taxa * janela_s), int(taxa * passo_s)
+    if len(audio) < janela:
+        return np.zeros((len(FAIXAS_FALA), 0)), janela, passo
+    n = 1 + (len(audio) - janela) // passo
+    frequencias = np.fft.rfftfreq(janela, 1 / taxa)
+    faixas = [(frequencias >= baixa) & (frequencias < alta) for baixa, alta in FAIXAS_FALA]
+    peso = np.hanning(janela).astype(np.float32)
+    quadros = np.lib.stride_tricks.sliding_window_view(audio, janela)[::passo][:n]
+    energia = np.empty((len(faixas), n))
+    for i in range(0, n, 4096):  # em blocos, para um vídeo longo não ocupar memória demais
+        espectro = np.abs(np.fft.rfft(quadros[i:i + 4096] * peso, axis=1)) ** 2
+        for f, faixa in enumerate(faixas):
+            energia[f, i:i + 4096] = espectro[:, faixa].sum(axis=1)
+    energia /= (peso.astype(np.float64) ** 2).sum() * janela / 2
+    return 10 * np.log10(energia + 1e-12), janela, passo
+
+
+def _trechos(marcados: np.ndarray) -> list[tuple[int, int]]:
+    """Início e fim (inclusive) de cada sequência de valores verdadeiros."""
+    bordas = np.diff(np.concatenate([[0], marcados.astype(int), [0]]))
+    return list(zip(np.flatnonzero(bordas == 1), np.flatnonzero(bordas == -1) - 1))
+
+
 def detectar_fala(audio: np.ndarray, taxa: int = TAXA_ANALISE) -> tuple[float, float] | None:
     """Onde o som útil (a fala) começa e termina, em segundos.
 
@@ -142,21 +176,61 @@ def detectar_fala(audio: np.ndarray, taxa: int = TAXA_ANALISE) -> tuple[float, f
     que o Veo coloca por baixo da fala. Devolve None quando não há contraste (clipe mudo ou só ruído/música
     contínua), e aí o corte automático não é aplicado.
     """
-    db, janela, passo = _rms_db(audio, taxa)
-    if len(db) < 10:
+    db, janela, passo = _energia_por_faixa(audio, taxa)
+    n = db.shape[1]
+    if n < 10 or np.percentile(_rms_db(audio, taxa)[0], 98) < -50:
         return None
-    piso, topo = np.percentile(db, 5), np.percentile(db, 98)
-    if topo < -50 or topo - piso < 10:
+    piso = np.percentile(db, 5, axis=1, keepdims=True)
+    topo = np.percentile(db, 98, axis=1, keepdims=True)
+    com_contraste = (topo - piso >= 10)[:, 0]
+    if not com_contraste.any():
         return None
-    ativo = db > max(piso + 10, topo - 30)
-    # Exige 50 ms seguidos acima do limiar para um estalo não contar como fala.
-    sustentado = np.convolve(ativo.astype(int), np.ones(5, dtype=int), mode="valid") == 5
-    indices = np.flatnonzero(sustentado)
-    if len(indices) == 0:
+    db, piso, topo = db[com_contraste], piso[com_contraste], topo[com_contraste]
+
+    # Prova de fala: 50 ms seguidos bem acima do ruído em alguma faixa. Um estalo isolado não chega a tanto.
+    forte = (db > np.maximum(piso + 10, topo - 30)).any(axis=0)
+    comeco_da_prova = np.convolve(forte.astype(int), np.ones(5, dtype=int), mode="valid") == 5
+    if not comeco_da_prova.any():
         return None
-    inicio = indices[0] * passo / taxa
-    fim = ((indices[-1] + 4) * passo + janela) / taxa
-    return round(float(inicio), 3), round(float(min(fim, len(audio) / taxa)), 3)
+    prova = np.convolve(comeco_da_prova.astype(int), np.ones(5, dtype=int))[:n] > 0
+
+    # Onde há som: a média de 100 ms da energia acima do ruído. A média junta as sílabas e não deixa a variação
+    # natural do ruído passar por som; abaixo de 50 dB do mais alto do clipe é silêncio para qualquer efeito.
+    k = round(0.1 * taxa / passo)
+    media = np.array([np.convolve(np.pad(10 ** (faixa / 10), (k // 2, k - 1 - k // 2), mode="edge"),
+                                  np.ones(k) / k, mode="valid") for faixa in db])
+    media = 10 * np.log10(media)
+    limiar = np.maximum(np.percentile(media, 5, axis=1, keepdims=True) + 4,
+                        np.percentile(media, 98, axis=1, keepdims=True) - 50)
+    trechos = _trechos((media > limiar).any(axis=0))
+
+    # Conta como fala o trecho com prova de fala ou que dura uma palavra, mesmo baixinha (a primeira palavra
+    # fraca antes de uma vírgula). Tudo entre o primeiro e o último fica.
+    palavra = PALAVRA_FRACA * taxa / passo
+    fala = [i for i, (a, b) in enumerate(trechos) if prova[a:b + 1].any() or b - a + 1 >= palavra]
+    if not fala:
+        return None
+    primeiro, ultimo = fala[0], fala[-1]
+    # Sons separados por uma pausa curta entram junto: a sílaba fraca, a respiração, o splash ou o estalo que
+    # vem logo antes da primeira palavra.
+    pausa = PAUSA_DENTRO_DA_FALA * taxa / passo
+    while primeiro > 0 and trechos[primeiro][0] - trechos[primeiro - 1][1] - 1 <= pausa:
+        primeiro -= 1
+    while ultimo < len(trechos) - 1 and trechos[ultimo + 1][0] - trechos[ultimo][1] - 1 <= pausa:
+        ultimo += 1
+    ini, fim = trechos[primeiro][0], trechos[ultimo][1]
+
+    # A média começa a subir meia janela antes do som e termina meia janela depois: as bordas voltam até o
+    # primeiro e o último trecho de 20 ms que já têm som de verdade.
+    com_som = (db > np.maximum(piso + 3, topo - 50)).any(axis=0)
+    for _ in range(k // 2):
+        if ini < fim and not com_som[ini]:
+            ini += 1
+        if fim > ini and not com_som[fim]:
+            fim -= 1
+    inicio = ini * passo / taxa
+    final = (fim * passo + janela) / taxa
+    return round(float(inicio), 3), round(float(min(final, len(audio) / taxa)), 3)
 
 
 def picos_onda(audio: np.ndarray, taxa: int = TAXA_ANALISE) -> dict:
