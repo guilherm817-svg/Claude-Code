@@ -14,6 +14,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from . import config
 from .exportar import ErroExportacao, Exportador
 from .projetos import Ajustes, ErroImportacao, Estudio, ProjetoNaoEncontrado
+from .rotas_legendas import criar_rotas_legendas
 
 ESTATICOS = Path(__file__).parent / "static"
 # Pedidos que mudam algo precisam deste cabeçalho. Um site qualquer aberto no navegador não consegue mandá-lo
@@ -168,6 +169,8 @@ def criar_app(estudio: Estudio | None = None) -> FastAPI:
         pasta = estudio.pasta_exportados(projeto_id)
         pasta.mkdir(parents=True, exist_ok=True)
         _abrir_pasta(pasta)
+
+    app.include_router(criar_rotas_legendas(estudio))
 
     # A tela
 

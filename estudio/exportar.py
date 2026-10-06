@@ -8,6 +8,7 @@ exportação e a memória não cresce com o número de clipes.
 
 import hashlib
 import re
+import shutil
 import subprocess
 import tempfile
 import threading
@@ -15,9 +16,11 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-from . import config
+from . import config, legendas
 from .midia import SEM_JANELA, ffmpeg, medir_volume
-from .projetos import Estudio, Projeto, novo_id
+from .projetos import Estudio, Item, Projeto, novo_id
+
+PASTA_FONTES = Path(__file__).parent / "static" / "fontes"
 
 VERSAO_RENDER = 1  # mude quando a receita dos trechos mudar, para não reaproveitar trechos antigos
 FADE_EMENDA = 0.012  # s de fade em cada ponta do áudio, para a emenda não estalar
@@ -42,6 +45,7 @@ class Trecho:
     duracao: float
     tem_audio: bool
     ganho_db: float = 0.0
+    legenda: str | None = None  # o .ass das legendas deste trecho, se houver
 
 
 def escolher_fps(usos: list[tuple[float, float]]) -> tuple[str, float]:
@@ -77,7 +81,9 @@ def _par(valor: int) -> int:
     return max(2, valor - valor % 2)
 
 
-def filtro_video(largura: int, altura: int, fps: str, quadros: int, enquadramento: str) -> str:
+def filtro_video(largura: int, altura: int, fps: str, quadros: int, enquadramento: str,
+                 legenda: str | None = None) -> str:
+    """legenda: caminho do .ass relativo à pasta onde o ffmpeg roda (a de cache do projeto)."""
     if enquadramento == "desfocado":
         # Fundo: o próprio vídeo ampliado e desfocado (reduzido antes, para o desfoque sair barato).
         pl, pa = _par(largura // 8), _par(altura // 8)
@@ -91,8 +97,11 @@ def filtro_video(largura: int, altura: int, fps: str, quadros: int, enquadrament
                  f"crop={largura}:{altura},")
     # tpad + trim garantem exatamente `quadros` quadros, mesmo que o clipe acabe um quadro antes. Nada de setpts
     # depois do fps: ele apaga a taxa de quadros e o ffmpeg cai nos 25 quadros/s padrão, descartando quadros.
+    # A legenda entra por último, já no tamanho final. Caminhos relativos e simples: no Windows, o C:\ de um
+    # caminho completo quebraria o filtro.
+    texto = f",ass=filename={legenda}:fontsdir=fontes" if legenda else ""
     return (f"[0:v]setpts=PTS-STARTPTS,{corpo}setsar=1,fps={fps},format=yuv420p,"
-            f"tpad=stop_mode=clone:stop_duration=1,trim=end_frame={quadros}[v]")
+            f"tpad=stop_mode=clone:stop_duration=1,trim=end_frame={quadros}{texto}[v]")
 
 
 def filtro_audio(indice: int, duracao: float, ganho_db: float) -> str:
@@ -102,7 +111,7 @@ def filtro_audio(indice: int, duracao: float, ganho_db: float) -> str:
 
 
 def comando_trecho(trecho: Trecho, largura: int, altura: int, fps: str, fps_valor: float, enquadramento: str,
-                   saida: Path) -> list[str]:
+                   saida: Path, legenda: str | None = None) -> list[str]:
     quadros = contar_quadros(trecho.duracao, fps_valor)
     duracao = quadros / fps_valor
     leitura = f"{duracao + 0.5:.3f}"  # lê um pouco a mais; o corte exato é feito pelos filtros
@@ -111,7 +120,7 @@ def comando_trecho(trecho: Trecho, largura: int, altura: int, fps: str, fps_valo
     if not trecho.tem_audio:
         args += ["-f", "lavfi", "-t", leitura, "-i", "anullsrc=r=48000:cl=stereo"]
         indice_audio = 1
-    grafo = (filtro_video(largura, altura, fps, quadros, enquadramento) + ";"
+    grafo = (filtro_video(largura, altura, fps, quadros, enquadramento, legenda) + ";"
              + filtro_audio(indice_audio, duracao, trecho.ganho_db if trecho.tem_audio else 0.0))
     return args + [
         "-filter_complex", grafo, "-map", "[v]", "-map", "[a]",
@@ -124,6 +133,32 @@ def comando_trecho(trecho: Trecho, largura: int, altura: int, fps: str, fps_valo
 def comando_juntar(lista: Path, saida: Path) -> list[str]:
     return ["-y", "-f", "concat", "-safe", "0", "-i", str(lista), "-map", "0:v:0", "-map", "0:a:0",
             "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", "-f", "mp4", str(saida)]
+
+
+def legenda_do_item(projeto: Projeto, item: Item, largura: int, altura: int) -> str | None:
+    """O .ass das legendas de um trecho da linha do tempo, ou None se ele fica sem legenda."""
+    palavras = projeto.legendas.get(item.midia_id) if projeto.legendas_ativas else None
+    if not palavras:
+        return None
+    estilo = projeto.estilo_legenda.model_dump()
+    telas = legendas.legendas_do_trecho([p.model_dump() for p in palavras], item.entrada, item.saida, estilo,
+                                        largura, altura)
+    return legendas.gerar_ass(telas, estilo, largura, altura) if telas else None
+
+
+def preparar_legenda(cache: Path, texto: str) -> str:
+    """Grava o .ass e as fontes dentro da pasta de cache. Devolve o caminho do .ass relativo a ela."""
+    fontes = cache / "fontes"
+    fontes.mkdir(parents=True, exist_ok=True)
+    for fonte in legendas.FONTES.values():
+        origem, copia = PASTA_FONTES / fonte["arquivo"], fontes / fonte["arquivo"]
+        if not copia.exists() or copia.stat().st_size != origem.stat().st_size:
+            shutil.copyfile(origem, copia)
+    pasta = cache / "legendas"
+    pasta.mkdir(exist_ok=True)
+    nome = hashlib.sha1(texto.encode()).hexdigest()[:20] + ".ass"
+    (pasta / nome).write_text(texto, encoding="utf-8")
+    return f"legendas/{nome}"
 
 
 def linha_da_lista(caminho: Path) -> str:
@@ -211,11 +246,14 @@ class Exportador:
 
     def _exportar(self, exp: Exportacao, projeto: Projeto) -> str:
         largura, altura, _ = config.FORMATOS[projeto.formato]
+        cache = self.estudio.pasta_cache(projeto.id).resolve()  # o ffmpeg dos trechos roda nesta pasta
         trechos = []
         for item in projeto.linha:
             midia = projeto.midia(item.midia_id)
-            trechos.append((midia, Trecho(arquivo=self.estudio.arquivo_midia(projeto.id, midia), entrada=item.entrada,
-                                          duracao=item.saida - item.entrada, tem_audio=midia.tem_audio)))
+            trechos.append((midia, Trecho(arquivo=self.estudio.arquivo_midia(projeto.id, midia).resolve(),
+                                          entrada=item.entrada, duracao=item.saida - item.entrada,
+                                          tem_audio=midia.tem_audio,
+                                          legenda=legenda_do_item(projeto, item, largura, altura))))
         fps, fps_valor = escolher_fps([(m.fps, t.duracao) for m, t in trechos])
 
         if projeto.igualar_volume:
@@ -227,7 +265,7 @@ class Exportador:
                 exp.progresso = 0.1 * n / len(trechos)
 
         exp.estado = "renderizando"
-        pasta_trechos = self.estudio.pasta_cache(projeto.id) / "trechos"
+        pasta_trechos = cache / "trechos"
         pasta_trechos.mkdir(parents=True, exist_ok=True)
         total = sum(contar_quadros(t.duracao, fps_valor) for _, t in trechos) / fps_valor
         feito = 0.0
@@ -236,20 +274,28 @@ class Exportador:
             self._verificar(exp)
             exp.etapa = f"Montando o clipe {n} de {len(trechos)}…"
             arquivo = trecho.arquivo
-            chave = "|".join(map(str, [
+            partes = [
                 VERSAO_RENDER, arquivo.name, arquivo.stat().st_size, arquivo.stat().st_mtime_ns,
                 f"{trecho.entrada:.3f}", contar_quadros(trecho.duracao, fps_valor), largura, altura, fps,
                 projeto.enquadramento, f"{trecho.ganho_db:.2f}",
-            ]))
+            ]
+            if trecho.legenda:  # sem legenda, a chave fica igual à de antes: os trechos já feitos continuam valendo
+                partes.append(hashlib.sha1(trecho.legenda.encode()).hexdigest())
+            chave = "|".join(map(str, partes))
             destino = pasta_trechos / (hashlib.sha1(chave.encode()).hexdigest()[:20] + ".mov")
             duracao = contar_quadros(trecho.duracao, fps_valor) / fps_valor
             if not destino.exists():
                 temporario = destino.with_suffix(".tmp.mov")
                 inicio = 0.1 + 0.85 * feito / total
-                self._ffmpeg(exp, comando_trecho(trecho, largura, altura, fps, fps_valor, projeto.enquadramento,
-                                                 temporario),
-                             lambda t, inicio=inicio, d=duracao: setattr(
-                                 exp, "progresso", inicio + 0.85 * min(t, d) / total))
+                ass = preparar_legenda(cache, trecho.legenda) if trecho.legenda else None
+                try:
+                    self._ffmpeg(exp, comando_trecho(trecho, largura, altura, fps, fps_valor, projeto.enquadramento,
+                                                     temporario, ass),
+                                 lambda t, inicio=inicio, d=duracao: setattr(
+                                     exp, "progresso", inicio + 0.85 * min(t, d) / total), pasta=cache)
+                finally:
+                    if ass:
+                        (cache / ass).unlink(missing_ok=True)
                 temporario.replace(destino)
             feito += duracao
             exp.progresso = 0.1 + 0.85 * feito / total
@@ -277,12 +323,12 @@ class Exportador:
                 arquivo.unlink(missing_ok=True)
         return nome
 
-    def _ffmpeg(self, exp: Exportacao, args: list[str], ao_avancar) -> None:
+    def _ffmpeg(self, exp: Exportacao, args: list[str], ao_avancar, pasta: Path | None = None) -> None:
         """Roda o ffmpeg acompanhando o progresso (segundos já gravados) e permitindo cancelar."""
         with tempfile.TemporaryFile() as erros:
             processo = subprocess.Popen(
                 [ffmpeg(), "-hide_banner", "-nostdin", "-v", "error", "-progress", "pipe:1", "-nostats", *args],
-                stdout=subprocess.PIPE, stderr=erros, creationflags=SEM_JANELA,
+                stdout=subprocess.PIPE, stderr=erros, creationflags=SEM_JANELA, cwd=pasta,
             )
             exp._processo = processo
             for linha in processo.stdout:

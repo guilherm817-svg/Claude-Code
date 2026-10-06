@@ -3,6 +3,7 @@
 import { api } from './api.js';
 import { icone } from './icones.js';
 import { LinhaDoTempo, desenharOnda, desenharTira } from './linha.js';
+import { Legendas } from './painel_legendas.js';
 import { Previa } from './previa.js';
 import { $, avisar, el, guardar, lembrar, limitar, relogio, segundos, tamanhoArquivo } from './util.js';
 
@@ -76,8 +77,8 @@ function avisosDaMidia(midia) {
 // Desfazer, refazer e salvamento automático
 
 function instantaneo() {
-  const { nome, formato, enquadramento, igualar_volume, linha } = estado.projeto;
-  return JSON.stringify({ nome, formato, enquadramento, igualar_volume, linha });
+  const { nome, formato, enquadramento, igualar_volume, linha, legendas_ativas, idioma_legenda, estilo_legenda, legendas } = estado.projeto;
+  return JSON.stringify({ nome, formato, enquadramento, igualar_volume, linha, legendas_ativas, idioma_legenda, estilo_legenda, legendas });
 }
 
 function registrar(antes) {
@@ -97,7 +98,10 @@ function editar(mudanca) {
 }
 
 function restaurar(texto) {
-  Object.assign(estado.projeto, JSON.parse(texto));
+  const dados = JSON.parse(texto);
+  // Uma transcrição que chegou depois deste ponto continua: ela não é uma edição a desfazer.
+  dados.legendas = { ...estado.projeto.legendas, ...dados.legendas };
+  Object.assign(estado.projeto, dados);
   if (!estado.projeto.linha.some((i) => i.id === estado.selecionado)) estado.selecionado = null;
   agendarSalvamento();
   atualizar();
@@ -326,6 +330,7 @@ async function importar(arquivos) {
       estado.projeto.midias.push(resposta.midia);
       estado.projeto.linha.push(resposta.item);
       carregarRecursos(resposta.midia);
+      legendas.aoImportar(resposta.midia);
       // O servidor já gravou o clipe no fim da linha; desfazer tira ele da linha (a mídia continua importada).
       estado.desfazer.push(antes);
       estado.refazer = [];
@@ -357,6 +362,7 @@ function atualizar() {
   const formato = formatoAtual();
   previa.definirFormato(formato.largura, formato.altura, estado.projeto.enquadramento);
   previa.definirSequencia(seq);
+  if (!previa.tocando) previa.desenhar(); // a legenda pode ter mudado mesmo com a montagem igual
   linha.definir({ sequencia: seq, selecionado: estado.selecionado });
   desenharTopo();
   desenharMidias();
@@ -420,6 +426,7 @@ async function apagarMidia(midia) {
   }
   estado.projeto.midias = estado.projeto.midias.filter((m) => m.id !== midia.id);
   estado.projeto.linha = estado.projeto.linha.filter((i) => i.midia_id !== midia.id);
+  delete estado.projeto.legendas[midia.id];
   estado.desfazer = [];
   estado.refazer = [];
   if (!estado.projeto.linha.some((i) => i.id === estado.selecionado)) estado.selecionado = null;
@@ -438,6 +445,8 @@ function campoDeCorte(item, lado, rotulo) {
 
 function desenharInspetor() {
   const painel = $('#inspetor');
+  // Redesenhar o painel tiraria o cursor de quem está corrigindo o texto da legenda; ele volta ao sair do campo.
+  if (document.activeElement?.tagName === 'TEXTAREA' && painel.contains(document.activeElement)) return;
   const item = itemSelecionado();
   if (!item) {
     painel.replaceChildren(...painelDoProjeto());
@@ -466,6 +475,7 @@ function desenharInspetor() {
         el('button', { class: 'botao', onclick: () => marcarNaAgulha('inicio'), title: 'O clipe passa a começar na agulha (I)' }, icone('marcarInicio', 15), 'Início na agulha'),
         el('button', { class: 'botao', onclick: () => marcarNaAgulha('fim'), title: 'O clipe passa a terminar na agulha (O)' }, icone('marcarFim', 15), 'Fim na agulha')),
       avisos.length ? el('div', { class: 'lista-avisos' }, ...avisos.map((texto) => el('p', { class: 'aviso' }, icone('alerta', 14), el('span', {}, texto)))) : null,
+      legendas.secaoDoClipe(item, midia),
       el('dl', { class: 'ficha' },
         el('dt', {}, 'Resolução'), el('dd', {}, `${midia.largura}×${midia.altura}`),
         el('dt', {}, 'Quadros/s'), el('dd', {}, String(midia.fps).replace('.', ',')),
@@ -561,6 +571,7 @@ function painelDoProjeto() {
       el('label', { class: 'opcao caixa' },
         el('input', { type: 'checkbox', checked: p.igualar_volume, onchange: (e) => editar((proj) => { proj.igualar_volume = e.target.checked; }) }),
         el('span', {}, el('strong', {}, 'Igualar o volume'), el('small', {}, 'Deixa todos os clipes no mesmo volume, no padrão das redes (−14 LUFS).'))),
+      legendas.secaoDoProjeto(),
       el('details', { class: 'atalhos' },
         el('summary', {}, 'Atalhos de teclado'),
         el('dl', {}, ...[
@@ -595,9 +606,15 @@ async function abrirExportacao() {
     el('li', {}, el('span', {}, 'Formato'), el('strong', {}, `${formato.nome} · ${formato.largura}×${formato.altura}`)),
     el('li', {}, el('span', {}, 'Duração'), el('strong', {}, `${relogio(previa.total)} · ${seq.length} ${seq.length === 1 ? 'clipe' : 'clipes'}`)),
     el('li', {}, el('span', {}, 'Proporção diferente'), el('strong', {}, p.enquadramento === 'preencher' ? 'preencher a tela' : 'fundo desfocado')),
-    el('li', {}, el('span', {}, 'Volume'), el('strong', {}, p.igualar_volume ? 'igualado (−14 LUFS)' : 'original de cada clipe')));
-  $('#exportar-avisos').replaceChildren(...(avisos.length ? [el('p', { class: 'aviso' }, icone('alerta', 14),
-    el('span', {}, `${avisos.length} ${avisos.length === 1 ? 'clipe pode ter' : 'clipes podem ter'} palavra cortada na geração. Vale ouvir antes de postar.`))] : []));
+    el('li', {}, el('span', {}, 'Volume'), el('strong', {}, p.igualar_volume ? 'igualado (−14 LUFS)' : 'original de cada clipe')),
+    el('li', {}, el('span', {}, 'Legendas'), el('strong', {}, p.legendas_ativas ? 'ligadas' : 'desligadas')));
+  const semLegenda = p.legendas_ativas ? seq.filter((s) => s.midia.tem_audio && !(s.midia.id in p.legendas)).length : 0;
+  $('#exportar-avisos').replaceChildren(...[
+    avisos.length ? el('p', { class: 'aviso' }, icone('alerta', 14),
+      el('span', {}, `${avisos.length} ${avisos.length === 1 ? 'clipe pode ter' : 'clipes podem ter'} palavra cortada na geração. Vale ouvir antes de postar.`)) : null,
+    semLegenda ? el('p', { class: 'aviso' }, icone('alerta', 14),
+      el('span', {}, `${semLegenda} ${semLegenda === 1 ? 'clipe ainda não foi transcrito e sai' : 'clipes ainda não foram transcritos e saem'} sem legenda.`)) : null,
+  ].filter(Boolean));
   mostrarFaseExportacao('inicio');
   dialogo.showModal();
   desenharExportados();
@@ -683,6 +700,7 @@ async function abrirProjeto(id) {
   previa.tempo = 0;
   atualizar();
   linha.ajustar();
+  legendas.aoAbrirProjeto(projeto);
 }
 
 async function novoProjeto() {
@@ -779,6 +797,11 @@ const previa = new Previa({
     const midia = midiaDe(midiaId);
     if (midia) avisar(`A prévia não consegue tocar “${midia.nome}” (${midia.codec}) neste navegador. A exportação funciona normalmente.`, 'erro', 9000);
   },
+  aoDesenhar: (ctx, tempo, largura) => {
+    if (!estado.projeto) return;
+    const segmento = previa.sequencia.find((s) => tempo < s.inicio + s.duracao) || previa.sequencia.at(-1);
+    legendas.desenharNaPrevia(ctx, segmento, tempo, largura);
+  },
 });
 
 const linha = new LinhaDoTempo($('#linha'), {
@@ -794,6 +817,25 @@ const linha = new LinhaDoTempo($('#linha'), {
   aoAparar: aparar,
   aoTerminarEdicao: terminarEdicao,
   aoReordenar: reordenar,
+  legendasDo: (segmento) => legendas.telasDaLinha(segmento),
+});
+
+const legendas = new Legendas({
+  projeto: () => estado.projeto,
+  formato: formatoAtual,
+  editar,
+  mesclar: (midiaId, palavras) => {
+    if (midiaDe(midiaId)) estado.projeto.legendas = { ...estado.projeto.legendas, [midiaId]: palavras };
+  },
+  comecarEdicao,
+  terminarEdicao,
+  garantirSalvo,
+  atualizar,
+  redesenhar: () => {
+    if (!estado.projeto) return;
+    if (!previa.tocando) previa.desenhar();
+    linha.definir({ sequencia: sequencia(), selecionado: estado.selecionado });
+  },
 });
 
 function montarAcoesDaLinha() {

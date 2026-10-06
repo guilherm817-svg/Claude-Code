@@ -25,3 +25,7 @@ VOLUME_ALVO = -14.0  # LUFS: volume de referência das redes sociais
 PICO_MAXIMO = -1.0  # dBTP: teto para o som não distorcer depois de subir o volume
 FOLGA_ANTES_DA_FALA = 0.12  # segundos mantidos antes da primeira palavra, para não comer o começo dela
 FOLGA_DEPOIS_DA_FALA = 0.25  # segundos mantidos depois da última palavra, para o fim não soar cortado
+
+# Legendas automáticas: o mesmo Whisper do Analisador, assim o modelo já baixado é aproveitado.
+MODELO_WHISPER = os.environ.get("ESTUDIO_MODELO_WHISPER") or "large-v3-turbo"
+DISPOSITIVO = os.environ.get("ESTUDIO_DISPOSITIVO") or "auto"  # auto, cpu ou cuda

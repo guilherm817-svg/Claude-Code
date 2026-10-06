@@ -56,8 +56,8 @@ function enviarArquivo(projetoId, arquivo, aoProgresso) {
 
 // O que a tela pode alterar num projeto (o resto é do servidor).
 export function ajustesDe(projeto) {
-  const { nome, formato, enquadramento, igualar_volume, linha } = projeto;
-  return { nome, formato, enquadramento, igualar_volume, linha };
+  const { nome, formato, enquadramento, igualar_volume, linha, legendas_ativas, idioma_legenda, estilo_legenda, legendas } = projeto;
+  return { nome, formato, enquadramento, igualar_volume, linha, legendas_ativas, idioma_legenda, estilo_legenda, legendas };
 }
 
 export const api = {
@@ -75,6 +75,9 @@ export const api = {
   cancelar: (exportacaoId) => pedir('POST', `/api/exportacoes/${exportacaoId}/cancelar`),
   exportados: (id) => pedir('GET', `/api/projetos/${id}/exportados`),
   abrirPasta: (id) => pedir('POST', `/api/projetos/${id}/abrir-pasta`),
+  transcrever: (id, midias, refazer) => enfileirar(() => pedir('POST', `/api/projetos/${id}/legendas`, { midias, refazer })),
+  transcricao: (trabalhoId) => pedir('GET', `/api/legendas/${trabalhoId}`),
+  sobreLegendas: () => pedir('GET', '/api/legendas'),
   urlArquivo: (id, midiaId) => `/api/projetos/${id}/midias/${midiaId}/arquivo`,
   urlTira: (id, midiaId) => `/api/projetos/${id}/midias/${midiaId}/tira.jpg`,
   urlExportado: (id, nome) => `/api/projetos/${id}/exportados/${encodeURIComponent(nome)}`,

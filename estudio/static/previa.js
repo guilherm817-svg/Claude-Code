@@ -5,7 +5,8 @@
 import { limitar } from './util.js';
 
 export class Previa {
-  constructor({ area, quadro, canvas, aoMudarTempo, aoTocarOuPausar, aoErro }) {
+  // aoDesenhar(ctx, tempo, largura, altura): desenha por cima de cada quadro (as legendas).
+  constructor({ area, quadro, canvas, aoMudarTempo, aoTocarOuPausar, aoErro, aoDesenhar }) {
     this.area = area;
     this.quadro = quadro;
     this.canvas = canvas;
@@ -13,6 +14,7 @@ export class Previa {
     this.aoMudarTempo = aoMudarTempo;
     this.aoTocarOuPausar = aoTocarOuPausar;
     this.aoErro = aoErro;
+    this.aoDesenhar = aoDesenhar;
     this.sequencia = [];
     this.total = 0;
     this.indice = -1;
@@ -191,6 +193,11 @@ export class Previa {
   }
 
   desenhar() {
+    this._desenharVideo();
+    this.aoDesenhar?.(this.ctx, this.tempo, this.canvas.width, this.canvas.height);
+  }
+
+  _desenharVideo() {
     const { ctx, canvas } = this;
     const L = canvas.width;
     const A = canvas.height;
