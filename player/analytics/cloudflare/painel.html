@@ -575,7 +575,7 @@
         coluna(cx, d.plays, 'barra-2');
       }
       const ultimo = i === dias.length - 1;
-      if (ultimo || (i % cadaRotulo === 0 && dias.length - 1 - i >= Math.max(1, cadaRotulo / 2))) {
+      if (ultimo || (i % cadaRotulo === 0 && dias.length - 1 - i >= cadaRotulo)) { // o penúltimo rótulo só entra se houver espaço antes do último
         svgEl('text', { x: cx, y: H - m.bottom + 18, 'text-anchor': 'middle' }, svg).textContent = fmtDia(d.dia);
       }
     });
