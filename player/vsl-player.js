@@ -230,6 +230,7 @@
         duration: round(this.player.duration),
         maxTime: round(this.player.reached),
         unmuted: this.player.unmuted,
+        pitch: this.player._pitchAt == null ? null : this.player._pitchAt,
         watched: toRanges(this.watched), // acumulado da sessão: o servidor pode substituir, não somar
         events: this.queue,
         sentAt: Date.now(),

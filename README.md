@@ -124,7 +124,9 @@ No arquivo `.env` (veja `.env.example`):
 A pasta [`player/`](player/README.md) tem um player de vídeo para páginas de vendas no estilo VTurb: autoplay
 mudo com "clique para ouvir", barra de progresso inteligente, botão de compra que aparece no minuto certo,
 "continuar de onde parou", sem controles de avanço e com eventos para pixels e retenção. É independente do
-app: são dois arquivos (`vsl-player.js` e `vsl-player.css`) para colar em qualquer página.
+app: são dois arquivos (`vsl-player.js` e `vsl-player.css`) para colar em qualquer página. Em
+[`player/analytics/`](player/analytics/README.md) há um servidor em Python, sem dependências, que recebe os
+dados do player e mostra o painel de retenção (`python player/analytics/servidor.py`).
 
 ## Para desenvolvedores
 
@@ -140,6 +142,7 @@ analisador/
   __main__.py              linha de comando
 tests/                     pytest (o Claude e o Whisper são simulados)
 player/                    player de VSL (JavaScript puro) com demo, documentação e teste no Chromium
+player/analytics/          servidor de analytics do player (biblioteca padrão + SQLite) e painel de retenção
 ```
 
 ```bash

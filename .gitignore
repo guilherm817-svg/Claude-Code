@@ -15,3 +15,5 @@ player/testes/t2.html
 player/testes/t3.html
 player/testes/capturas/
 player/testes/node_modules/
+player/analytics/dados.sqlite*
+player/testes/e2e.html

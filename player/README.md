@@ -18,7 +18,7 @@ Abra `index.html` para ver a demonstração.
 | **Pausa com mensagem** | Ao pausar aparece "Clique para continuar assistindo". No fim, "Assistir novamente". |
 | **Pitch** | `data-pitch="12:30"` dispara o evento `pitch` uma vez por visitante quando a oferta começa. |
 | **Eventos para pixels** | `play`, `unmute`, `pitch`, `milestone` (10/25/50/75/90/100 %), `ended`... prontos para o Meta Pixel, GA4, TikTok etc. |
-| **Retenção** | Opcionalmente envia para uma URL sua os eventos e os segundos assistidos de cada visitante. |
+| **Retenção** | Opcionalmente envia para uma URL sua os eventos e os segundos assistidos de cada visitante. A pasta `analytics/` traz um servidor pronto com painel de retenção. |
 | **HLS** | Aceita `.m3u8` (nativo no Safari; nos outros navegadores com o hls.js). |
 | **Celular** | Toca dentro da página (sem abrir o player do sistema), textos e botões escalam com a largura do player. Botão de tela cheia opcional. |
 
@@ -184,6 +184,7 @@ como `text/plain` para não exigir preflight de CORS:
   "duration": 1830.5,
   "maxTime": 772.3,
   "unmuted": true,
+  "pitch": 750,
   "watched": [[0, 120], [300, 772]],
   "events": [
     { "type": "unmute", "ts": 1760000000000, "time": 0 },
@@ -201,20 +202,17 @@ como `text/plain` para não exigir preflight de CORS:
 - Com isso dá para montar a curva de retenção (quantos visitantes viram cada segundo), a taxa de play
   (`unmute` ÷ sessões) e quantos chegaram ao pitch.
 
-Exemplo mínimo de servidor em Python (FastAPI):
+**Já vem um servidor pronto:** a pasta [`analytics/`](analytics/README.md) tem um servidor em Python (só
+biblioteca padrão + SQLite) que recebe esses envios e mostra o painel com curva de retenção, taxa de play,
+chegada ao pitch, origens e dispositivos:
 
-```python
-from fastapi import FastAPI, Request
-app = FastAPI()
-
-@app.post("/vsl")
-async def receber(req: Request):
-    dados = await req.json()   # o corpo é JSON, mesmo com Content-Type text/plain
-    salvar(dados)              # grave no seu banco por (player, visitor, session)
-    return {"ok": True}
+```bash
+python player/analytics/servidor.py --porta 8080 --token um-segredo
 ```
 
-Se o endpoint estiver em outro domínio, responda com `Access-Control-Allow-Origin` para o domínio da página.
+Se preferir o seu próprio backend, qualquer rota que aceite `POST` serve: leia o corpo como JSON (mesmo com
+`Content-Type: text/plain`), grave por (`player`, `visitor`, `session`) e responda com
+`Access-Control-Allow-Origin` para o domínio da página.
 
 ## API em JavaScript
 
