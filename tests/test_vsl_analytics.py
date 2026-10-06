@@ -5,9 +5,11 @@ Rodam sem as dependências do app: python -m pytest tests/test_vsl_analytics.py 
 
 import http.client
 import json
+import logging
+import socket
 import sys
 import threading
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -153,6 +155,96 @@ def test_csv():
     assert linhas[1].startswith("s1;vsl-principal;vis-1;")
 
 
+def test_csv_neutraliza_formulas():
+    banco = servidor.Banco()
+    banco.registrar(envio(session="=cmd|' /C calc'!A0", visitor="+1", url="https://site.com/?utm_source=@SUM(1)&utm_campaign=-x"))
+    linha = banco.csv().splitlines()[1].split(";")
+    assert linha[0].startswith("'=") and linha[2] == "'+1" and linha[5] == "'@sum(1)" and linha[6] == "'@SUM(1)" and linha[8] == "'-x"
+    assert linha[14] == "120.0"  # números continuam números
+
+
+def test_teto_de_duracao_nao_derruba_o_resumo():
+    banco = servidor.Banco()
+    banco.registrar(envio(duration=1e300, maxTime=1e300, watched=[[0, 1e300], [5, 10 ** 400]],
+                          events=[{"type": "x", "ts": 1e300, "time": 1e300, "n": 10 ** 400}]))
+    r = banco.resumo()
+    assert r["duracao"] == servidor.MAX_SEGUNDOS and len(r["retencao"]["pontos"]) <= servidor.PONTOS_CURVA
+    sessao = banco.sessoes()[0]
+    assert sessao["max_tempo"] == servidor.MAX_SEGUNDOS + 1 - 1 and json.loads(sessao["assistido"]) == [[0, servidor.MAX_SEGUNDOS]]
+    assert r["eventos"][0]["tipo"] == "x"
+
+
+def test_max_tempo_nunca_passa_do_que_foi_assistido():
+    banco = servidor.Banco()
+    banco.registrar(envio(maxTime=500, watched=[[0, 4]]))          # maxTime inflado (ex.: player antigo mandando o reached)
+    assert banco.sessoes()[0]["max_tempo"] == 5
+    assert banco.resumo()["chegaram_pitch"] == 0                     # pitch aos 30 s: não chegou
+    banco.registrar(envio(maxTime=500, watched=[[0, 4], [5, 35]]))  # agora assistiu até 35
+    assert banco.sessoes()[0]["max_tempo"] == 36 and banco.resumo()["chegaram_pitch"] == 1
+
+
+def test_pitch_de_cada_player_na_vista_geral():
+    banco = servidor.Banco()
+    banco.registrar(envio("a", player="curto", pitch=10, maxTime=20, watched=[[0, 19]]))
+    banco.registrar(envio("b", player="longo", pitch=50, maxTime=20, watched=[[0, 19]]))
+    geral = banco.resumo()
+    assert geral["chegaram_pitch"] == 1 and geral["pitch"] is None and geral["pitch_misto"] is True
+    assert {o["nome"]: o["pitch"] for o in geral["origens"]} == {"facebook": 1}
+    assert banco.resumo("longo")["pitch"] == 50 and banco.resumo("longo")["chegaram_pitch"] == 0
+    assert banco.resumo(pitch=15)["chegaram_pitch"] == 2 and banco.resumo(pitch=15)["pitch_misto"] is False
+
+
+def test_duracao_do_player_e_a_ultima_e_o_resumo_usa_a_do_periodo():
+    banco = servidor.Banco()
+    banco.registrar(envio("a", duration=600, maxTime=300, watched=[[0, 299]]), agora=datetime(2026, 9, 1, 10))
+    banco.registrar(envio("b", duration=120, maxTime=60, watched=[[0, 59]]), agora=datetime(2026, 10, 1, 10))
+    assert banco.players()[0]["duracao"] == 120
+    assert banco.resumo(de="2026-10-01")["duracao"] == 120
+    assert banco.resumo(ate="2026-09-30")["duracao"] == 600
+    assert banco.resumo(de="2026-10-01")["engajamento"] == 0.5
+
+
+def test_pitch_invalido_e_pitch_zero():
+    assert servidor._pitch("abc") is None and servidor._pitch(True) is None and servidor._pitch(-1) is None
+    assert servidor._pitch([1]) is None and servidor._pitch("nan") is None and servidor._pitch("12.5") == 12.5
+    assert servidor._pitch(0) == 0.0
+    banco = servidor.Banco()
+    banco.registrar(envio(pitch="abc"))
+    assert banco.players()[0]["pitch"] is None
+    banco.registrar(envio(pitch=0))
+    assert banco.players()[0]["pitch"] == 0 and banco.resumo()["chegaram_pitch"] == 1
+    banco.registrar(envio(pitch="lixo"))
+    assert banco.players()[0]["pitch"] == 0  # pitch inválido não apaga o que já estava gravado
+
+
+def test_segundos_nao_passam_da_duracao():
+    banco = servidor.Banco()
+    banco.registrar(envio(duration=30.5, maxTime=30.5, watched=[[0, 30]]))
+    r = banco.resumo()
+    assert banco.sessoes()[0]["segundos"] == 30.5 and r["tempo_medio"] == 30.5 and r["engajamento"] == 1.0
+
+
+def test_periodo_pelo_relogio_do_servidor():
+    banco = servidor.Banco()
+    hoje = datetime.now().replace(hour=12)
+    banco.registrar(envio("recente"), agora=hoje)
+    banco.registrar(envio("antiga"), agora=hoje - timedelta(days=40))
+    assert banco.resumo(periodo="30")["sessoes"] == 1 and banco.resumo(periodo="hoje")["sessoes"] == 1
+    assert banco.resumo(periodo="tudo")["sessoes"] == 2 and banco.resumo(periodo="90")["sessoes"] == 2
+    r = banco.resumo(periodo="7")
+    assert r["de"] == (date.today() - timedelta(days=6)).isoformat() and r["ate"] == date.today().isoformat() == r["hoje"]
+    with pytest.raises(ValueError):
+        banco.resumo(periodo="ontem")
+    assert banco.csv(periodo="30").count("\n") == 2
+
+
+def test_evento_no_mesmo_milissegundo_com_seq_nao_e_descartado():
+    banco = servidor.Banco()
+    banco.registrar(envio(events=[{"type": "reach", "ts": 5, "time": 10, "at": 10, "seq": 1},
+                                  {"type": "reach", "ts": 5, "time": 10, "at": 10, "seq": 2}]))
+    assert banco.resumo()["eventos"][0]["total"] == 2
+
+
 # ---------------------------------------------------------------- HTTP
 
 
@@ -171,6 +263,7 @@ def pedir(tmp_path):
         con.close()
         return resp.status, dict(resp.getheaders()), dados
 
+    _pedir.porta = porta
     yield _pedir
     srv.shutdown()
     srv.server_close()
@@ -207,6 +300,44 @@ def test_painel_e_api_pedem_token(pedir):
     assert pedir("GET", "/api/sessoes.csv")[0] == 401
     status, cab, csv = pedir("GET", "/api/sessoes.csv?token=segredo&player=vsl-principal")
     assert status == 200 and "attachment" in cab["Content-Disposition"] and csv.decode("utf-8-sig").startswith("sessao;")
+    assert json.loads(pedir("GET", "/api/config")[2]) == {"token": True, "versao": "1.0", "hoje": date.today().isoformat()}
     assert pedir("GET", "/saude")[0] == 200
     assert pedir("GET", "/nada")[0] == 404
     assert pedir("GET", "/painel.html")[0] == 404  # nada de servir arquivos da pasta
+    status, cab, _ = pedir("HEAD", "/api/resumo?token=segredo")
+    assert status == 200 and int(cab["Content-Length"]) > 10
+
+
+def test_parametros_invalidos_dao_400(pedir):
+    cab = {"X-Token": "segredo"}
+    assert pedir("GET", "/api/resumo?de=2026-13-01", None, cab)[0] == 400
+    assert pedir("GET", "/api/resumo?ate=ontem", None, cab)[0] == 400
+    assert pedir("GET", "/api/resumo?pitch=abc", None, cab)[0] == 400
+    assert pedir("GET", "/api/resumo?periodo=x", None, cab)[0] == 400
+    assert pedir("GET", "/api/resumo?periodo=7&pitch=12.5", None, cab)[0] == 200
+    assert pedir("GET", "/api/sessoes.csv?de=2026-99-99", None, cab)[0] == 400
+
+
+def test_nome_do_csv_e_seguro(pedir):
+    status, cab, _ = pedir("GET", '/api/sessoes.csv?token=segredo&player=../x"y;%20z%C3%A7')
+    assert status == 200 and cab["Content-Disposition"] == 'attachment; filename="sessoes-.._x_y_z.csv"'
+
+
+def test_coleta_aguenta_numeros_absurdos(pedir):
+    corpo = b'{"player":"p","session":"s","duration":1e300,"watched":[[0,Infinity],[1,1e300]],"events":[{"type":"a","ts":1e300,"n":1e999}]}'
+    assert pedir("POST", "/vsl", corpo, {"Content-Length": str(len(corpo))})[0] == 204
+    corpo = b'{"player":"p","session":"s","events":[' + b'[' * 100000 + b']' * 100000 + b']}'
+    assert pedir("POST", "/vsl", corpo, {"Content-Length": str(len(corpo))})[0] == 400
+
+
+def test_log_esconde_o_token(pedir, caplog):
+    with caplog.at_level(logging.INFO, logger="vsl.analytics"):
+        pedir("GET", "/api/resumo?token=segredo&player=p")
+        # http.client recusa caracteres de controle na URL, então manda a linha crua pelo socket
+        sock = socket.create_connection(("127.0.0.1", pedir.porta), timeout=5)
+        sock.sendall(b"GET /\x1b[31mnada HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
+        sock.recv(4096)
+        sock.close()
+    texto = caplog.text
+    assert "segredo" not in texto and "token=***" in texto and "player=p" in texto
+    assert "\x1b" not in texto and "\\x1b" in texto

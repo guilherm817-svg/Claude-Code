@@ -233,16 +233,21 @@ async function waitTime(page, t, timeout = 15000) {
     });
     await page.goto(BASE + '/t2.html');
     await waitState(page, 'autoplaying');
-    await page.click('#vsl-teste');
+    await waitTime(page, 8);            // 8 s no mudo: não podem contar como assistidos
+    await page.click('#vsl-teste');     // recomeça do zero, com som
     await waitState(page, 'playing');
-    await waitTime(page, 6);
+    await waitTime(page, 3);
     await sleep(300);
     await player(page, 'player.tracker.flush()');
     await sleep(500);
     check(envios.length >= 1, 'requisições recebidas no endpoint', envios.length);
     const ultimo = envios.length ? JSON.parse(envios[envios.length - 1].body) : null;
     check(ultimo && ultimo.player === 'vsl-teste' && ultimo.visitor && ultimo.session, 'payload traz player, visitor e session', ultimo && Object.keys(ultimo));
+    check(ultimo && ultimo.pitch === 5, 'payload traz o tempo do pitch', ultimo && ultimo.pitch);
     check(ultimo && ultimo.watched.length >= 1 && ultimo.watched[0][0] === 0, 'faixas de retenção acumuladas', ultimo && ultimo.watched);
+    const fim = ultimo ? Math.max(...ultimo.watched.map((f) => f[1])) : -1;
+    check(ultimo && fim >= 2 && fim <= 5 && ultimo.maxTime <= 6 && ultimo.reached >= 7, 'retenção e maxTime contam só o trecho com som; reached guarda o mudo', ultimo && { watched: ultimo.watched, maxTime: ultimo.maxTime, reached: ultimo.reached });
+    check(ultimo && ultimo.events.every((e) => typeof e.seq === 'number'), 'eventos levam um contador seq');
     const tipos = envios.flatMap((e) => JSON.parse(e.body).events.map((ev) => ev.type));
     check(tipos.includes('unmute') && tipos.includes('pitch'), 'eventos unmute e pitch enviados', tipos);
     console.log('  info: tipo da requisição =', envios.map((e) => e.type + '/' + e.method).join(', '));

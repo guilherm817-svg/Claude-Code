@@ -194,6 +194,8 @@
       this.queue = [];
       this.watched = new Set();
       this.dirty = false;
+      this.maxTime = 0; // até onde ESTA sessão chegou com som (o `reached` do player atravessa visitas)
+      this.seq = 0;     // distingue eventos emitidos no mesmo milissegundo
       if (!this.url) return;
       this.visitor = storage.get('visitor');
       if (!this.visitor) { this.visitor = uuid(); storage.set('visitor', this.visitor); }
@@ -208,13 +210,14 @@
 
     second(time) {
       if (!this.url) return;
+      if (time > this.maxTime) this.maxTime = time;
       const s = Math.floor(time);
       if (!this.watched.has(s)) { this.watched.add(s); this.dirty = true; }
     }
 
     track(type, detail) {
       if (!this.url) return;
-      this.queue.push(Object.assign({ type, ts: Date.now(), time: round(this.player.currentTime) }, plain(detail)));
+      this.queue.push(Object.assign({ type, ts: Date.now(), time: round(this.player.currentTime), seq: this.seq++ }, plain(detail)));
       if (FLUSH_NOW.indexOf(type) >= 0) this.flush();
     }
 
@@ -228,10 +231,11 @@
         url: global.location.href,
         referrer: document.referrer,
         duration: round(this.player.duration),
-        maxTime: round(this.player.reached),
+        maxTime: round(this.maxTime),            // nesta sessão, com som
+        reached: round(this.player.reached),     // entre visitas (inclui autoplay mudo)
         unmuted: this.player.unmuted,
         pitch: this.player._pitchAt == null ? null : this.player._pitchAt,
-        watched: toRanges(this.watched), // acumulado da sessão: o servidor pode substituir, não somar
+        watched: toRanges(this.watched), // segundos assistidos com som, acumulados na sessão (o servidor une)
         events: this.queue,
         sentAt: Date.now(),
       };
@@ -435,7 +439,7 @@
       const t = v.currentTime;
       const d = v.duration;
       if (!v.seeking) this._lastTime = t;
-      if (!v.paused) this.tracker.second(t);
+      if (!v.paused && !v.muted) this.tracker.second(t); // retenção só conta o que foi visto com som
       if (t > this.reached) this.reached = t;
       if (t - this._lastSaved >= 1 || t < this._lastSaved) { this._lastSaved = t; this._persist(false); }
       this._applyElements(t);

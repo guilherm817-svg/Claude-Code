@@ -184,7 +184,7 @@
     <select id="player" aria-label="Player"><option value="">Todos os players</option></select>
     <div class="direita">
       <span class="atualizado" id="atualizado"></span>
-      <a class="botao" id="csv" href="#" download>Exportar CSV</a>
+      <a class="botao" id="csv" href="#">Exportar CSV</a>
       <button type="button" class="botao" id="recarregar">Atualizar</button>
     </div>
   </div>
@@ -257,8 +257,6 @@
     return (h ? h + ':' + String(m).padStart(2, '0') : String(m)) + ':' + String(r).padStart(2, '0');
   };
   const fmtDia = (iso) => iso.slice(8, 10) + '/' + iso.slice(5, 7);
-  const hoje = () => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), d.getDate()); };
-  const iso = (d) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
   const svgEl = (tag, attrs, pai) => {
     const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
     Object.entries(attrs || {}).forEach(([k, v]) => el.setAttribute(k, v));
@@ -274,8 +272,8 @@
   const ticksBonitos = (max, qtd) => {
     if (max <= 0) return [0];
     const bruto = max / qtd;
-    const pot = Math.pow(10, Math.floor(Math.log10(bruto)));
-    const passo = [1, 2, 2.5, 5, 10].map((m) => m * pot).find((p) => max / p <= qtd) || pot * 10;
+    const pot = Math.max(1, Math.pow(10, Math.floor(Math.log10(bruto))));
+    const passo = [1, 2, 2.5, 5, 10].filter((m) => pot >= 10 || m !== 2.5).map((m) => m * pot).find((p) => max / p <= qtd) || pot * 10;
     const ticks = [];
     for (let v = 0; v <= max + 1e-9; v += passo) ticks.push(Math.round(v * 1000) / 1000);
     if (ticks[ticks.length - 1] < max) ticks.push(ticks[ticks.length - 1] + passo);
@@ -284,7 +282,7 @@
   const NOMES_EVENTOS = {
     ready: 'Carregou', autoplay: 'Autoplay (mudo)', autoplay_blocked: 'Autoplay bloqueado pelo aparelho',
     unmute: 'Clique para ouvir (play)', play: 'Play / retomada', pause: 'Pausa', ended: 'Terminou o vídeo',
-    replay: 'Assistiu de novo', milestone: 'Marcos de 10 a 100 %', pitch: 'Chegou ao pitch', reach: 'Elemento liberado',
+    replay: 'Assistiu de novo', milestone: 'Marcos de 10 a 100 %', pitch: 'Evento pitch (1× por visitante, conta o mudo)', reach: 'Elemento liberado',
     resume_prompt: 'Viu a pergunta de retomar', resume_continue: 'Continuou de onde parou', resume_restart: 'Começou do início',
     seek_blocked: 'Tentou pular', fullscreen: 'Tela cheia', error: 'Erro ao carregar',
   };
@@ -305,22 +303,30 @@
     return resp.json();
   }
 
-  function intervalo() {
-    const fim = hoje();
-    if (estado.periodo === 'tudo') return { de: '', ate: '' };
+  // Os períodos prontos (hoje, 7, 30, 90 dias) são calculados pelo servidor, com o relógio dele, que é o
+  // mesmo que carimba as sessões. Só o período personalizado manda datas.
+  function filtros() {
     if (estado.periodo === 'custom') return { de: estado.de, ate: estado.ate };
-    if (estado.periodo === 'hoje') return { de: iso(fim), ate: iso(fim) };
-    const inicio = new Date(fim); inicio.setDate(fim.getDate() - (parseInt(estado.periodo, 10) - 1));
-    return { de: iso(inicio), ate: iso(fim) };
+    return { periodo: estado.periodo };
   }
 
   let ultimo = null;
   let timer = null;
-
   let pedeToken = null; // null = ainda não perguntou ao servidor
+  let pedido = 0;       // número do último carregar(): respostas atrasadas de pedidos antigos são ignoradas
+  const escrito = { de: '', ate: '' }; // último valor que o painel escreveu nos campos de data
+
+  function preencherDatas(de, ate) {
+    [['#de', de || ''], ['#ate', ate || '']].forEach(([sel, valor]) => {
+      const campo = $(sel);
+      const chave = sel.slice(1);
+      // não sobrescreve o que a pessoa está digitando
+      if (document.activeElement !== campo && campo.value === escrito[chave]) { campo.value = valor; escrito[chave] = valor; }
+    });
+  }
 
   async function carregar() {
-    const { de, ate } = intervalo();
+    const meu = ++pedido;
     if (pedeToken === null) {
       try { pedeToken = (await api('api/config')).token; } catch (e) { pedeToken = false; }
     }
@@ -331,19 +337,18 @@
     }
     try { sessionStorage.setItem('vsl-painel', JSON.stringify(estado)); } catch (e) { /* ignora */ }
     document.querySelectorAll('.periodos button').forEach((b) => b.setAttribute('aria-pressed', b.dataset.periodo === estado.periodo ? 'true' : 'false'));
-    $('#de').value = de; $('#ate').value = ate;
     $('#conteudo').classList.add('carregando');
     try {
-      const [players, resumo] = await Promise.all([api('api/players'), api('api/resumo', { player: estado.player, de, ate })]);
+      const [players, resumo] = await Promise.all([api('api/players'), api('api/resumo', Object.assign({ player: estado.player }, filtros()))]);
+      if (meu !== pedido) return; // chegou um pedido mais novo enquanto este esperava
       $('#pedir-token').classList.add('oculto');
-      preencherPlayers(players.players);
+      if (!preencherPlayers(players.players)) { carregar(); return; } // o player filtrado sumiu: recarrega sem filtro
       ultimo = resumo;
-      render(resumo);
-      const csv = new URL('api/sessoes.csv', location.href);
-      Object.entries({ player: estado.player, de, ate, token: token() }).forEach(([k, v]) => { if (v) csv.searchParams.set(k, v); });
-      $('#csv').href = csv.toString();
+      preencherDatas(resumo.de, resumo.ate);
+      render(resumo, players.players);
       $('#atualizado').textContent = 'atualizado às ' + new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
     } catch (erro) {
+      if (meu !== pedido) return;
       if (erro.token) {
         $('#conteudo').classList.add('oculto'); $('#vazio').classList.add('oculto');
         $('#pedir-token').classList.remove('oculto');
@@ -352,22 +357,37 @@
         $('#atualizado').textContent = 'erro ao carregar: ' + erro.message;
       }
     } finally {
-      $('#conteudo').classList.remove('carregando');
+      if (meu === pedido) $('#conteudo').classList.remove('carregando');
     }
   }
 
+  // Devolve false quando o player filtrado não existe mais (o chamador recarrega sem filtro).
   function preencherPlayers(lista) {
     const sel = $('#player');
-    const atual = estado.player;
     sel.replaceChildren(texto('option', 'Todos os players', { value: '' }));
     lista.forEach((p) => sel.appendChild(texto('option', p.player + ' (' + fmtN.format(p.sessoes) + ')', { value: p.player })));
-    sel.value = lista.some((p) => p.player === atual) ? atual : '';
-    estado.player = sel.value;
+    if (estado.player && !lista.some((p) => p.player === estado.player)) { estado.player = ''; return false; }
+    sel.value = estado.player;
+    return true;
+  }
+
+  // CSV: baixa com o token no cabeçalho, para ele não ir parar na URL nem no histórico.
+  async function baixarCsv() {
+    const url = new URL('api/sessoes.csv', location.href);
+    Object.entries(Object.assign({ player: estado.player }, filtros())).forEach(([k, v]) => { if (v) url.searchParams.set(k, v); });
+    const resp = await fetch(url, { headers: token() ? { 'X-Token': token() } : {} });
+    if (!resp.ok) { $('#atualizado').textContent = 'erro ao exportar: HTTP ' + resp.status; return; }
+    const blob = await resp.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'sessoes-' + (estado.player || 'todos').replace(/[^A-Za-z0-9._-]+/g, '_') + '.csv';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
   }
 
   // ---------------------------------------------------------------- renderização
-  function render(r) {
-    const vazio = r.sessoes === 0 && estado.periodo === 'tudo' && !estado.player;
+  function render(r, players) {
+    const vazio = !(players || []).some((p) => p.sessoes > 0);
     $('#vazio').classList.toggle('oculto', !vazio);
     $('#conteudo').classList.toggle('oculto', vazio);
     if (vazio) {
@@ -392,11 +412,12 @@
   }
 
   function renderKpis(r) {
-    const pitchTxt = r.pitch != null ? 'pitch aos ' + fmtTempo(r.pitch) : 'sem data-pitch no player';
+    const temPitch = r.pitch != null || r.pitch_misto;
+    const pitchTxt = r.pitch != null ? 'pitch aos ' + fmtTempo(r.pitch) : r.pitch_misto ? 'pitch de cada player' : 'sem data-pitch no player';
     $('#kpis').replaceChildren(
       tile('Visualizações da página', fmtN.format(r.sessoes), fmtN.format(r.visitantes) + ' visitantes únicos'),
       tile('Plays (clicaram para ouvir)', fmtN.format(r.plays), 'taxa de play ' + fmtPct(r.taxa_play)),
-      tile('Chegaram ao pitch', r.pitch != null ? fmtN.format(r.chegaram_pitch) : '—', (r.pitch != null ? fmtPct(r.taxa_pitch) + ' dos plays · ' : '') + pitchTxt),
+      tile('Chegaram ao pitch', temPitch ? fmtN.format(r.chegaram_pitch) : '—', (temPitch ? fmtPct(r.taxa_pitch) + ' dos plays · ' : '') + pitchTxt),
       tile('Terminaram o vídeo', fmtN.format(r.terminaram), fmtPct(r.taxa_conclusao) + ' dos plays'),
       tile('Tempo médio assistido', fmtTempo(r.tempo_medio), 'mediana ' + fmtTempo(r.tempo_mediano) + ' · ' + fmtPct(r.engajamento, 0) + ' do vídeo'),
       tile('Duração do vídeo', r.duracao ? fmtTempo(r.duracao) : '—', 'informada pelo player'),
@@ -410,6 +431,7 @@
     const pontos = r.retencao.pontos;
     const passo = r.retencao.passo;
     const plays = r.plays;
+    dica.classList.remove('on');
     alvo.replaceChildren();
     $('#retencao-sub').textContent = plays
       ? 'Porcentagem dos ' + fmtN.format(plays) + ' plays que ainda assistiam em cada momento do vídeo.'
@@ -474,11 +496,13 @@
       dica.style.top = (alvo.offsetTop + cy / H * caixa.height - dica.offsetHeight - 12) + 'px';
     };
     const esconder = () => { cursor.setAttribute('opacity', 0); bolinha.setAttribute('opacity', 0); dica.classList.remove('on'); };
-    area.addEventListener('pointermove', (e) => {
+    const seguir = (e) => {
       const caixa = svg.getBoundingClientRect();
       const sx = (e.clientX - caixa.left) / caixa.width * W;
       mostrar(Math.round((sx - m.left) / pw * (pontos.length - 1)));
-    });
+    };
+    area.addEventListener('pointermove', seguir);
+    area.addEventListener('pointerenter', seguir);
     area.addEventListener('pointerleave', esconder);
     svg.addEventListener('keydown', (e) => {
       if (e.key === 'ArrowRight') { e.preventDefault(); mostrar((indice < 0 ? 0 : indice) + Math.max(1, Math.round(pontos.length / 60))); }
@@ -508,6 +532,7 @@
     const alvo = $('#dias-grafico');
     const dica = $('#dica-dias');
     const dias = r.por_dia;
+    dica.classList.remove('on');
     alvo.replaceChildren();
     if (!dias.length) { alvo.appendChild(texto('p', 'Sem dados no período.', { class: 'legenda-texto' })); $('#dias-tabela').replaceChildren(); return; }
 
@@ -519,7 +544,8 @@
     const topo = ticks[ticks.length - 1];
     const y = (v) => m.top + (1 - v / topo) * ph;
     const banda = pw / dias.length;
-    const largura = Math.min(24, Math.max(2, (banda - 6) / 2 - 1));
+    const ladoALado = banda >= 8; // duas colunas por dia só quando cabem com folga de 2px entre elas
+    const largura = ladoALado ? Math.min(24, (banda - 3) / 2) : Math.max(1, banda - 1);
     const svg = svgEl('svg', { viewBox: '0 0 ' + W + ' ' + H, height: H, role: 'img', 'aria-label': 'Visualizações e plays por dia' });
 
     ticks.forEach((t) => {
@@ -537,8 +563,13 @@
     };
     dias.forEach((d, i) => {
       const cx = m.left + banda * (i + 0.5);
-      coluna(cx - largura / 2 - 1, d.sessoes, 'barra-1');
-      coluna(cx + largura / 2 + 1, d.plays, 'barra-2');
+      if (ladoALado) {
+        coluna(cx - largura / 2 - 1, d.sessoes, 'barra-1');
+        coluna(cx + largura / 2 + 1, d.plays, 'barra-2');
+      } else {
+        coluna(cx, d.sessoes, 'barra-1'); // com muitos dias, os plays ficam sobrepostos às visualizações
+        coluna(cx, d.plays, 'barra-2');
+      }
       if (i % cadaRotulo === 0 || i === dias.length - 1) {
         svgEl('text', { x: cx, y: H - m.bottom + 18, 'text-anchor': 'middle' }, svg).textContent = fmtDia(d.dia);
       }
@@ -610,7 +641,7 @@
     const corpo = tabela.createTBody();
     eventos.forEach((e) => {
       const tr = corpo.insertRow();
-      tr.appendChild(texto('td', NOMES_EVENTOS[e.tipo] || 'Evento seu'));
+      tr.appendChild(texto('td', Object.hasOwn(NOMES_EVENTOS, e.tipo) ? NOMES_EVENTOS[e.tipo] : 'Evento seu'));
       tr.appendChild(texto('td', e.tipo));
       tr.appendChild(texto('td', fmtN.format(e.total), { class: 'num' }));
       tr.appendChild(texto('td', fmtN.format(e.sessoes), { class: 'num' }));
@@ -619,11 +650,18 @@
   }
 
   // ---------------------------------------------------------------- controles
-  document.querySelectorAll('.periodos button').forEach((b) => b.addEventListener('click', () => { estado.periodo = b.dataset.periodo; carregar(); }));
+  document.querySelectorAll('.periodos button').forEach((b) => b.addEventListener('click', () => {
+    estado.periodo = b.dataset.periodo;
+    escrito.de = $('#de').value; escrito.ate = $('#ate').value; // libera os campos para receberem as datas do período
+    carregar();
+  }));
   $('#aplicar').addEventListener('click', () => {
     if (!$('#de').value && !$('#ate').value) return;
-    estado.periodo = 'custom'; estado.de = $('#de').value; estado.ate = $('#ate').value; carregar();
+    estado.periodo = 'custom'; estado.de = $('#de').value; estado.ate = $('#ate').value;
+    escrito.de = estado.de; escrito.ate = estado.ate;
+    carregar();
   });
+  $('#csv').addEventListener('click', (e) => { e.preventDefault(); baixarCsv(); });
   $('#player').addEventListener('change', (e) => { estado.player = e.target.value; carregar(); });
   $('#recarregar').addEventListener('click', carregar);
   document.querySelectorAll('[data-tabela]').forEach((b) => b.addEventListener('click', () => {

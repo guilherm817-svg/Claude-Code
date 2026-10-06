@@ -183,22 +183,26 @@ como `text/plain` para não exigir preflight de CORS:
   "referrer": "https://l.facebook.com/",
   "duration": 1830.5,
   "maxTime": 772.3,
+  "reached": 772.3,
   "unmuted": true,
   "pitch": 750,
   "watched": [[0, 120], [300, 772]],
   "events": [
-    { "type": "unmute", "ts": 1760000000000, "time": 0 },
-    { "type": "milestone", "ts": 1760000183000, "time": 183.1, "percent": 10 },
-    { "type": "pitch", "ts": 1760000750000, "time": 750.0, "at": 750 }
+    { "type": "unmute", "ts": 1760000000000, "time": 0, "seq": 0 },
+    { "type": "milestone", "ts": 1760000183000, "time": 183.1, "seq": 1, "percent": 10 },
+    { "type": "pitch", "ts": 1760000750000, "time": 750.0, "seq": 2, "at": 750 }
   ],
   "sentAt": 1760000800000
 }
 ```
 
-- `visitor` fica no localStorage e repete entre visitas; `session` muda a cada carregamento da página.
-- Em cada evento, `ts` é o horário (ms) e `time` o segundo do vídeo em que aconteceu.
-- `watched` são as faixas de segundos assistidos **acumuladas na sessão**: a cada envio vem a lista completa,
-  então o servidor deve substituir a anterior, não somar.
+- `visitor` fica no localStorage e repete entre visitas; `session` muda a cada carregamento de cada player.
+- Em cada evento, `ts` é o horário (ms), `time` o segundo do vídeo em que aconteceu e `seq` um contador que
+  distingue eventos emitidos no mesmo milissegundo.
+- `watched` são as faixas de segundos assistidos **com som**, acumuladas na sessão: a cada envio vem a lista
+  completa, então o servidor deve substituir a anterior (ou unir), não somar. `maxTime` é até onde esta sessão
+  chegou com som; `reached` é o maior tempo já alcançado por esse navegador entre visitas, contando o autoplay
+  mudo (é o que libera os elementos com delay).
 - Com isso dá para montar a curva de retenção (quantos visitantes viram cada segundo), a taxa de play
   (`unmute` ÷ sessões) e quantos chegaram ao pitch.
 
