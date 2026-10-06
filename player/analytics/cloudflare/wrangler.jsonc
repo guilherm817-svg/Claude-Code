@@ -5,7 +5,7 @@
   "name": "vsl-analytics",
   "main": "src/index.js",
   "compatibility_date": "2026-09-01",
-  "rules": [{ "type": "Text", "globs": ["**/*.html"] }],
+  // Arquivos .html são importados como texto pela regra padrão do wrangler (é assim que o painel entra no bundle).
   "vars": {
     // Fuso usado para agrupar as sessões por dia e para os períodos "hoje", "7 dias" etc.
     "FUSO": "America/Sao_Paulo"
