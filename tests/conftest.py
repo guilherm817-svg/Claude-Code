@@ -11,6 +11,7 @@ RAIZ = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(RAIZ))
 # Nunca usar a biblioteca nem a chave reais durante os testes.
 os.environ["ANALISADOR_PASTA_DADOS"] = str(RAIZ / ".pytest_cache" / "biblioteca-nao-usar")
+os.environ["ESTUDIO_PASTA_DADOS"] = str(RAIZ / ".pytest_cache" / "estudio-nao-usar")
 os.environ.pop("ANTHROPIC_API_KEY", None)
 os.environ.pop("ANTHROPIC_AUTH_TOKEN", None)
 

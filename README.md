@@ -119,6 +119,49 @@ No arquivo `.env` (veja `.env.example`):
 | `ANALISADOR_DISPOSITIVO` | `auto` | `cpu` para nunca tentar a GPU |
 | `ANALISADOR_PASTA_DADOS` | `biblioteca` | onde ficam transcrições e análises |
 
+## ✂️ Estúdio de Reels
+
+Um editor para montar Reels a partir de clipes gerados por IA (Flow/Veo, Kling, Seedance...), que saem com
+8 a 10 segundos cada. Você arrasta os clipes para a janela e o Estúdio:
+
+- **corta sozinho o silêncio** do começo e do fim de cada clipe (o "respiro" que os geradores colocam antes da
+  primeira palavra), para um clipe emendar direto no outro, sem tempo morto;
+- **avisa quando a fala encosta na borda** do clipe, sinal de palavra cortada na geração;
+- **iguala o volume** de todos os clipes no padrão das redes (−14 LUFS);
+- **exporta em 1080×1920** (ou 4:5, 1:1 e 16:9), cortando as sobras ou com fundo desfocado quando um clipe tem
+  outra proporção.
+
+Ele roda no seu computador, como o Analisador: os vídeos não saem da sua máquina.
+
+**Para abrir:** dê dois cliques em `iniciar-estudio.bat` (Windows) ou rode `./iniciar-estudio.sh` (Mac/Linux).
+Na primeira vez ele instala o que precisa, inclusive o ffmpeg, e depois abre no navegador
+(`http://127.0.0.1:8502`).
+
+**Como usar:**
+
+1. Arraste os vídeos para a janela (ou clique em **Importar**). Eles entram na linha do tempo em ordem de nome
+   (Bloco 2 antes de Bloco 10), já com o silêncio cortado.
+2. Aperte **Espaço** para assistir à montagem. Para mudar a ordem, arraste um clipe na linha do tempo. Para
+   cortar mais, arraste as bordas amarelas do clipe ou use o painel da direita, que mostra o clipe inteiro com a
+   forma de onda.
+3. Clique em **Exportar vídeo**. O arquivo fica em `meus-reels/<projeto>/exportados/` e também pode ser baixado
+   pela tela.
+
+O botão de celular, embaixo da prévia, mostra onde a interface do Reels (curtir, comentar, nome e legenda) cobre
+o vídeo. Tudo é salvo sozinho, e **Ctrl+Z** desfaz qualquer edição.
+
+| Atalho | O que faz |
+|---|---|
+| Espaço | tocar / pausar |
+| ← → | anda um quadro (com Shift, 1 segundo) |
+| ↑ ↓ | vai para o clipe anterior / próximo |
+| S | divide o clipe na agulha |
+| I / O | o clipe passa a começar / terminar na agulha |
+| Ctrl+D | duplica o clipe |
+| Delete | tira o clipe da linha do tempo |
+| Ctrl+Z / Ctrl+Shift+Z | desfazer / refazer |
+| Z | mostra o vídeo inteiro na linha do tempo |
+
 ## 🎬 Player de VSL
 
 A pasta [`player/`](player/README.md) tem um player de vídeo para páginas de vendas no estilo VTurb: autoplay
@@ -144,10 +187,17 @@ analisador/
   __main__.py              linha de comando
 tests/                     pytest (o Claude e o Whisper são simulados)
 player/                    player de VSL (JavaScript puro) com demo, documentação e teste no Chromium
+estudio/                   Estúdio de Reels
+  midia.py                 ffmpeg: sondar o vídeo, achar a fala, medir o volume, miniaturas e forma de onda
+  projetos.py              projetos em pastas/JSON: mídia importada e linha do tempo
+  exportar.py              renderiza cada trecho e emenda tudo sem recodificar o vídeo
+  servidor.py              API local (FastAPI) e a tela
+  static/                  a tela (JavaScript puro, sem build): linha do tempo, prévia e exportação
 player/analytics/          servidor de analytics do player (biblioteca padrão + SQLite) e painel de retenção
 ```
 
 ```bash
 pip install -r requirements.txt pytest
 python -m pytest
+node tests/e2e_estudio.cjs   # Estúdio num Chromium de verdade (precisa do playwright)
 ```

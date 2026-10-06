@@ -4,8 +4,9 @@ __pycache__/
 *.pyc
 .pytest_cache/
 
-# Dados locais: suas aulas processadas e sua chave de API
+# Dados locais: suas aulas processadas, seus projetos de Reels e sua chave de API
 biblioteca/
+meus-reels/
 .env
 
 # Player de VSL: arquivos gerados pelo teste

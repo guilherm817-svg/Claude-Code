@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Estúdio de Reels</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect x='3' y='1' width='18' height='22' rx='4' fill='%238b5cf6'/%3E%3Cpolygon points='10 8 16 12 10 16' fill='white'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/estilo.css">
+  <script type="module" src="/static/app.js"></script>
+</head>
+<body>
+  <header class="topo">
+    <div class="marca" data-icone="filme" data-tamanho="20">Estúdio de Reels</div>
+    <div class="projeto">
+      <input id="nome-projeto" class="nome-projeto" maxlength="120" aria-label="Nome do projeto" spellcheck="false">
+      <button id="btn-projetos" class="botao fantasma" aria-haspopup="menu">Projetos <span data-icone="seta" data-tamanho="14"></span></button>
+      <div id="menu-projetos" class="menu" role="menu" hidden></div>
+    </div>
+    <div class="acoes-topo">
+      <span id="estado-salvo" class="estado-salvo" aria-live="polite"></span>
+      <button id="btn-desfazer" class="botao-icone" title="Desfazer (Ctrl+Z)" aria-label="Desfazer" data-icone="desfazer"></button>
+      <button id="btn-refazer" class="botao-icone" title="Refazer (Ctrl+Shift+Z)" aria-label="Refazer" data-icone="refazer"></button>
+      <button id="btn-exportar" class="botao primario" data-icone="baixar" data-tamanho="16">Exportar vídeo</button>
+    </div>
+  </header>
+
+  <main class="area">
+    <aside class="painel midias" aria-label="Mídia do projeto">
+      <div class="painel-titulo">Mídia
+        <button id="btn-importar" class="botao pequeno" data-icone="importar" data-tamanho="14">Importar</button>
+      </div>
+      <input id="arquivos" type="file" multiple accept="video/*,.mp4,.mov,.m4v,.webm,.mkv,.avi" hidden>
+      <div id="importacoes" class="importacoes"></div>
+      <div id="lista-midias" class="lista-midias"></div>
+    </aside>
+
+    <section class="palco" aria-label="Prévia">
+      <div id="previa-area" class="previa-area">
+        <div id="previa-quadro" class="previa-quadro">
+          <canvas id="previa"></canvas>
+          <div id="zona-segura" class="zona-segura" hidden aria-hidden="true">
+            <div class="zs zs-topo"><span>Topo do Reels</span></div>
+            <div class="zs zs-lateral"><span>Curtir, comentar, compartilhar</span></div>
+            <div class="zs zs-base"><span>Nome, legenda e áudio</span></div>
+          </div>
+          <div id="previa-vazia" class="previa-vazia">
+            <div data-icone="filme" data-tamanho="40"></div>
+            <p><strong>Comece pelos seus clipes</strong></p>
+            <p>Arraste os vídeos que você gerou no Flow (ou em qualquer gerador) para esta janela. O Estúdio corta o silêncio do começo e do fim de cada um e junta tudo na ordem.</p>
+            <button id="btn-importar-vazio" class="botao primario" data-icone="importar" data-tamanho="16">Importar vídeos</button>
+          </div>
+        </div>
+      </div>
+      <div class="transporte">
+        <div class="tempo"><span id="tempo-atual">0:00.0</span> <span class="sep">/</span> <span id="tempo-total">0:00.0</span></div>
+        <div class="controles">
+          <button id="btn-inicio" class="botao-icone" title="Início (Home)" aria-label="Ir para o início" data-icone="inicio"></button>
+          <button id="btn-anterior" class="botao-icone" title="Clipe anterior (↑)" aria-label="Clipe anterior" data-icone="anterior"></button>
+          <button id="btn-tocar" class="botao-tocar" title="Tocar (Espaço)" aria-label="Tocar ou pausar"></button>
+          <button id="btn-proximo" class="botao-icone" title="Próximo clipe (↓)" aria-label="Próximo clipe" data-icone="proximo"></button>
+          <button id="btn-fim" class="botao-icone" title="Fim (End)" aria-label="Ir para o fim" data-icone="fim"></button>
+        </div>
+        <div class="extras">
+          <button id="btn-zona" class="botao-icone" title="Mostrar onde a interface do Reels cobre o vídeo" aria-label="Zona segura do Reels" data-icone="celular"></button>
+          <button id="btn-mudo" class="botao-icone" title="Som da prévia" aria-label="Som da prévia"></button>
+        </div>
+      </div>
+    </section>
+
+    <aside id="inspetor" class="painel inspetor" aria-label="Detalhes"></aside>
+  </main>
+
+  <section id="linha" class="linha" aria-label="Linha do tempo"></section>
+
+  <div id="soltar" class="soltar" hidden><div><span data-icone="importar" data-tamanho="36"></span>Solte os vídeos para importar</div></div>
+
+  <dialog id="dialogo-exportar" class="dialogo">
+    <h2>Exportar vídeo</h2>
+    <ul id="exportar-resumo" class="exportar-resumo"></ul>
+    <div id="exportar-avisos"></div>
+    <div id="exportar-progresso" class="exportar-progresso" hidden>
+      <div class="barra grande"><span></span></div>
+      <p id="exportar-etapa" class="etapa"></p>
+    </div>
+    <div id="exportar-pronto" class="exportar-pronto" hidden>
+      <p class="sucesso">Vídeo pronto: <strong id="nome-exportado"></strong></p>
+      <div class="linha-botoes">
+        <a id="link-baixar" class="botao primario" data-icone="baixar" data-tamanho="16">Baixar</a>
+        <button id="btn-abrir-pasta" class="botao" data-icone="pasta" data-tamanho="16">Abrir a pasta</button>
+      </div>
+    </div>
+    <div id="exportados" class="exportados"></div>
+    <footer class="dialogo-rodape">
+      <button id="btn-fechar-exportacao" class="botao fantasma">Fechar</button>
+      <button id="btn-cancelar-exportacao" class="botao fantasma" hidden>Cancelar</button>
+      <button id="btn-iniciar-exportacao" class="botao primario">Exportar vídeo</button>
+    </footer>
+  </dialog>
+
+  <div id="avisos-flutuantes" class="avisos-flutuantes"></div>
+</body>
+</html>
