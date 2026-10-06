@@ -83,7 +83,7 @@ export class LinhaDoTempo {
       this.definirZoom(this.zoom * (e.deltaY < 0 ? 1.15 : 1 / 1.15), true);
     }, { passive: false });
     this.rolagem.addEventListener('scroll', () => this._desenharRegua());
-    new ResizeObserver(() => this.render()).observe(this.rolagem);
+    new ResizeObserver(() => (this._ajustarAoAparecer && this.rolagem.clientWidth ? this.ajustar() : this.render())).observe(this.rolagem);
     this._sincronizarControle();
   }
 
@@ -127,6 +127,9 @@ export class LinhaDoTempo {
 
   ajustar() {
     if (!this.total) return;
+    // Escondida (aba do Corretor aberta), a linha tem largura zero: ajusta quando ela aparecer.
+    this._ajustarAoAparecer = !this.rolagem.clientWidth;
+    if (this._ajustarAoAparecer) return;
     this.definirZoom((this.rolagem.clientWidth - 48) / this.total);
     this.rolagem.scrollLeft = 0;
   }

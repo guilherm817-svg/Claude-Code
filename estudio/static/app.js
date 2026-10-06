@@ -1,6 +1,7 @@
 // Tela principal do Estúdio: junta mídia, prévia, linha do tempo, painel do clipe e exportação.
 
 import { api } from './api.js';
+import { corretorAberto, iniciarCorretor, mostrarAba } from './corretor.js';
 import { icone } from './icones.js';
 import { LinhaDoTempo, desenharOnda, desenharTira } from './linha.js';
 import { Previa } from './previa.js';
@@ -725,6 +726,7 @@ async function alternarMenuProjetos() {
 // Teclado
 
 function teclado(e) {
+  if (corretorAberto()) return; // os atalhos são da montagem, que está escondida
   const alvo = e.target;
   if (alvo.closest('input, select, textarea, dialog[open]') && !(alvo.type === 'range' || alvo.type === 'checkbox' || alvo.type === 'radio')) return;
   if ($('#dialogo-exportar').open) return;
@@ -832,6 +834,7 @@ function montarEventos() {
     e.preventDefault();
     profundidade = 0;
     $('#soltar').hidden = true;
+    if (corretorAberto()) mostrarAba('montagem');
     importar(e.dataTransfer.files);
   });
 
@@ -895,6 +898,7 @@ async function iniciar() {
   montarAcoesDaLinha();
   montarEventos();
   previa.definirMudo(lembrar('mudo', false));
+  iniciarCorretor({ aoTrocarDeAba: (aba) => { if (aba !== 'montagem') previa.pausar(); } });
   try {
     estado.config = await api.config();
     const projetos = await api.listar();
