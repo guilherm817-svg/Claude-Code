@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 
 from estudio import exportar as exp
 from estudio.midia import (
-    ErroMidia, avisos_do_clipe, detectar_fala, ffmpeg, interpretar_sonda, ler_audio, medir_volume, picos_onda,
+    Cor, ErroMidia, avisos_do_clipe, detectar_fala, ffmpeg, interpretar_sonda, ler_audio, medir_volume, picos_onda,
     sondar, InfoVideo,
 )
 from estudio.projetos import Ajustes, ErroImportacao, Estudio, Item, Midia
@@ -75,7 +75,8 @@ Input #0, mov,mp4,m4a,3gp,3g2,mj2, from 'IMG_0001.MOV':
 
 def test_sonda_le_celular_girado():
     info = interpretar_sonda(SONDA_CELULAR)
-    assert info == InfoVideo(duracao=8.03, largura=1080, altura=1920, fps=29.97, codec="hevc", tem_audio=True)
+    assert info == InfoVideo(duracao=8.03, largura=1080, altura=1920, fps=29.97, codec="hevc", tem_audio=True,
+                             cor=Cor(matriz="bt709", primarias="bt709", transferencia="bt709", faixa="tv"))
 
 
 def test_sonda_ignora_capa_e_le_rotacao_antiga():

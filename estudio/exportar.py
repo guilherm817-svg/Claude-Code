@@ -7,22 +7,24 @@ exportação e a memória não cresce com o número de clipes.
 """
 
 import hashlib
+import os
 import re
 import shutil
 import subprocess
 import tempfile
 import threading
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
 from . import config, legendas
-from .midia import SEM_JANELA, ffmpeg, medir_volume
+from .midia import ERRO_AO_RODAR, SEM_JANELA, Cor, ErroMidia, ffmpeg, filtros, medir_volume, sondar
 from .projetos import Estudio, Item, Projeto, novo_id
 
 PASTA_FONTES = Path(__file__).parent / "static" / "fontes"
 
-VERSAO_RENDER = 1  # mude quando a receita dos trechos mudar, para não reaproveitar trechos antigos
+VERSAO_RENDER = 2  # mude quando a receita dos trechos mudar, para não reaproveitar trechos antigos
 FADE_EMENDA = 0.012  # s de fade em cada ponta do áudio, para a emenda não estalar
 
 # Taxas de quadros padrão. O vídeo final usa a que mais aparece entre os clipes.
@@ -46,6 +48,8 @@ class Trecho:
     tem_audio: bool
     ganho_db: float = 0.0
     legenda: str | None = None  # o .ass das legendas deste trecho, se houver
+    faixa_audio: int = 0  # qual faixa de áudio do arquivo usar (0:a:N)
+    cor: Cor = field(default_factory=Cor)
 
 
 def escolher_fps(usos: list[tuple[float, float]]) -> tuple[str, float]:
@@ -81,8 +85,30 @@ def _par(valor: int) -> int:
     return max(2, valor - valor % 2)
 
 
+def tem_tone_mapping() -> bool:
+    """O ffmpeg do imageio no Windows pode vir sem a zimg: sem o zscale, não há como converter HDR direito."""
+    return {"zscale", "tonemap"} <= filtros()
+
+
+def filtro_cor(cor: Cor) -> str:
+    """Leva o vídeo para BT.709 SDR em faixa limitada, o padrão das redes. Todo trecho precisa sair igual: a emenda
+    sem recodificar declara as cores do primeiro trecho para o vídeo inteiro."""
+    if cor.hdr:
+        if tem_tone_mapping():
+            # O branco de referência do HDR (203 nits, BT.2408) vira o branco do SDR: o mobius mantém o que fica
+            # abaixo dele (pele, roupa, parede) e só comprime os brilhos acima, sem escurecer o vídeo todo.
+            return ("zscale=t=linear:npl=203,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=mobius:desat=0,"
+                    "zscale=t=bt709:m=bt709:r=tv,format=yuv420p,")
+        # Sem eles, ao menos a matriz e a faixa ficam certas (as cores ficam um pouco lavadas).
+        return "scale=in_color_matrix=bt2020:out_color_matrix=bt709:out_range=tv,"
+    if cor.matriz in ("", "bt709") and cor.faixa != "pc":
+        return ""  # já é BT.709; sem marcação, é tratado como BT.709, como fazem os players
+    # Vídeo sem a matriz marcada é lido como BT.709 (o scale, sozinho, o leria como BT.601).
+    return f"scale=in_color_matrix={'auto' if cor.matriz else 'bt709'}:out_color_matrix=bt709:out_range=tv,"
+
+
 def filtro_video(largura: int, altura: int, fps: str, quadros: int, enquadramento: str,
-                 legenda: str | None = None) -> str:
+                 legenda: str | None = None, cor: Cor | None = None) -> str:
     """legenda: caminho do .ass relativo à pasta onde o ffmpeg roda (a de cache do projeto)."""
     if enquadramento == "desfocado":
         # Fundo: o próprio vídeo ampliado e desfocado (reduzido antes, para o desfoque sair barato).
@@ -95,17 +121,24 @@ def filtro_video(largura: int, altura: int, fps: str, quadros: int, enquadrament
     else:
         corpo = (f"scale={largura}:{altura}:force_original_aspect_ratio=increase:flags=lanczos,"
                  f"crop={largura}:{altura},")
+    # Sem setpts=PTS-STARTPTS: o -ss já deixa a linha do tempo do arquivo começando em 0 na entrada, igual para o
+    # vídeo e o áudio. Zerar cada um pelo seu primeiro quadro perderia o desencontro entre eles (áudio que começa
+    # depois do vídeo) e adiantaria o vídeo em até um quadro quando a entrada cai entre dois quadros. O fps com
+    # start_time=0 repete o primeiro quadro se o vídeo começar um pouco depois do 0.
     # tpad + trim garantem exatamente `quadros` quadros, mesmo que o clipe acabe um quadro antes. Nada de setpts
     # depois do fps: ele apaga a taxa de quadros e o ffmpeg cai nos 25 quadros/s padrão, descartando quadros.
     # A legenda entra por último, já no tamanho final. Caminhos relativos e simples: no Windows, o C:\ de um
     # caminho completo quebraria o filtro.
     texto = f",ass=filename={legenda}:fontsdir=fontes" if legenda else ""
-    return (f"[0:v]setpts=PTS-STARTPTS,{corpo}setsar=1,fps={fps},format=yuv420p,"
+    return (f"[0:v]{filtro_cor(cor or Cor())}{corpo}setsar=1,fps={fps}:start_time=0,"
+            f"setparams=range=tv:color_primaries=bt709:color_trc=bt709:colorspace=bt709,format=yuv420p,"
             f"tpad=stop_mode=clone:stop_duration=1,trim=end_frame={quadros}{texto}[v]")
 
 
-def filtro_audio(indice: int, duracao: float, ganho_db: float) -> str:
-    return (f"[{indice}:a]asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
+def filtro_audio(indice: int, duracao: float, ganho_db: float, faixa: int = 0) -> str:
+    # O aresample com first_pts=0 completa com silêncio o começo, se o áudio começar depois do vídeo.
+    return (f"[{indice}:a:{faixa}]aresample=48000:async=1:first_pts=0,"
+            f"aformat=sample_fmts=fltp:channel_layouts=stereo,"
             f"volume={ganho_db:.2f}dB,apad,atrim=end={duracao:.6f},"
             f"afade=t=in:d={FADE_EMENDA},afade=t=out:st={max(0.0, duracao - FADE_EMENDA):.6f}:d={FADE_EMENDA}[a]")
 
@@ -120,11 +153,13 @@ def comando_trecho(trecho: Trecho, largura: int, altura: int, fps: str, fps_valo
     if not trecho.tem_audio:
         args += ["-f", "lavfi", "-t", leitura, "-i", "anullsrc=r=48000:cl=stereo"]
         indice_audio = 1
-    grafo = (filtro_video(largura, altura, fps, quadros, enquadramento, legenda) + ";"
-             + filtro_audio(indice_audio, duracao, trecho.ganho_db if trecho.tem_audio else 0.0))
+    grafo = (filtro_video(largura, altura, fps, quadros, enquadramento, legenda, trecho.cor) + ";"
+             + filtro_audio(indice_audio, duracao, trecho.ganho_db if trecho.tem_audio else 0.0,
+                            trecho.faixa_audio if trecho.tem_audio else 0))
     return args + [
         "-filter_complex", grafo, "-map", "[v]", "-map", "[a]",
         "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-profile:v", "high", "-pix_fmt", "yuv420p",
+        "-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709", "-color_range", "tv",
         "-g", str(max(1, round(fps_valor * 2))),
         "-c:a", "pcm_s16le", "-ar", "48000", "-ac", "2", "-f", "mov", str(saida),
     ]
@@ -159,6 +194,27 @@ def preparar_legenda(cache: Path, texto: str) -> str:
     nome = hashlib.sha1(texto.encode()).hexdigest()[:20] + ".ass"
     (pasta / nome).write_text(texto, encoding="utf-8")
     return f"legendas/{nome}"
+
+
+def trocar(origem: Path, destino: Path, tentativas: int = 20, espera: float = 0.25) -> None:
+    """Troca atômica com novas tentativas: no Windows, o antivírus, o indexador ou o OneDrive às vezes abrem o
+    arquivo que o ffmpeg acabou de fechar, e a troca falha por alguns instantes."""
+    for n in range(tentativas):
+        try:
+            os.replace(origem, destino)
+            return
+        except PermissionError:
+            if n == tentativas - 1:
+                raise
+            time.sleep(espera)
+
+
+def apagar(arquivo: Path) -> None:
+    """Apaga se der. No Windows, um arquivo aberto por outro programa não pode ser apagado; fica para depois."""
+    try:
+        arquivo.unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 def linha_da_lista(caminho: Path) -> str:
@@ -248,12 +304,20 @@ class Exportador:
         largura, altura, _ = config.FORMATOS[projeto.formato]
         cache = self.estudio.pasta_cache(projeto.id).resolve()  # o ffmpeg dos trechos roda nesta pasta
         trechos = []
+        infos = {}
         for item in projeto.linha:
             midia = projeto.midia(item.midia_id)
-            trechos.append((midia, Trecho(arquivo=self.estudio.arquivo_midia(projeto.id, midia).resolve(),
-                                          entrada=item.entrada, duracao=item.saida - item.entrada,
-                                          tem_audio=midia.tem_audio,
-                                          legenda=legenda_do_item(projeto, item, largura, altura))))
+            arquivo = self.estudio.arquivo_midia(projeto.id, midia).resolve()
+            if midia.id not in infos:  # as cores e a faixa de áudio vêm do arquivo: valem para projetos antigos
+                try:
+                    infos[midia.id] = sondar(arquivo)
+                except ErroMidia as erro:
+                    raise ErroExportacao(f"“{midia.nome}”: {erro}") from erro
+            info = infos[midia.id]
+            trechos.append((midia, Trecho(arquivo=arquivo, entrada=item.entrada, duracao=item.saida - item.entrada,
+                                          tem_audio=midia.tem_audio and info.tem_audio,
+                                          legenda=legenda_do_item(projeto, item, largura, altura),
+                                          faixa_audio=info.faixa_audio, cor=info.cor)))
         fps, fps_valor = escolher_fps([(m.fps, t.duracao) for m, t in trechos])
 
         if projeto.igualar_volume:
@@ -261,7 +325,8 @@ class Exportador:
                 self._verificar(exp)
                 exp.etapa = f"Medindo o volume do clipe {n} de {len(trechos)}…"
                 if trecho.tem_audio:
-                    trecho.ganho_db = calcular_ganho(medir_volume(trecho.arquivo, trecho.entrada, trecho.duracao))
+                    trecho.ganho_db = calcular_ganho(medir_volume(trecho.arquivo, trecho.entrada, trecho.duracao,
+                                                                  trecho.faixa_audio))
                 exp.progresso = 0.1 * n / len(trechos)
 
         exp.estado = "renderizando"
@@ -281,6 +346,8 @@ class Exportador:
             ]
             if trecho.legenda:  # sem legenda, a chave fica igual à de antes: os trechos já feitos continuam valendo
                 partes.append(hashlib.sha1(trecho.legenda.encode()).hexdigest())
+            if trecho.cor.hdr:  # se o ffmpeg ganhar o tone mapping, o trecho HDR é refeito
+                partes.append(f"hdr-{tem_tone_mapping()}")
             chave = "|".join(map(str, partes))
             destino = pasta_trechos / (hashlib.sha1(chave.encode()).hexdigest()[:20] + ".mov")
             duracao = contar_quadros(trecho.duracao, fps_valor) / fps_valor
@@ -295,8 +362,8 @@ class Exportador:
                                      exp, "progresso", inicio + 0.85 * min(t, d) / total), pasta=cache)
                 finally:
                     if ass:
-                        (cache / ass).unlink(missing_ok=True)
-                temporario.replace(destino)
+                        apagar(cache / ass)
+                trocar(temporario, destino)
             feito += duracao
             exp.progresso = 0.1 + 0.85 * feito / total
             prontos.append(destino)
@@ -312,24 +379,28 @@ class Exportador:
         try:
             self._ffmpeg(exp, comando_juntar(lista, temporario),
                          lambda t: setattr(exp, "progresso", 0.95 + 0.05 * min(t / total, 1)))
-            temporario.replace(pasta_saida / nome)
+            trocar(temporario, pasta_saida / nome)
         finally:
-            temporario.unlink(missing_ok=True)
+            apagar(temporario)
 
         # Mantém no cache só os trechos desta versão: são os que a próxima exportação provavelmente reaproveita.
+        # O vídeo já está pronto: um trecho velho preso por outro programa não pode virar falha da exportação.
         usados = set(prontos)
         for arquivo in pasta_trechos.glob("*.mov"):
             if arquivo not in usados:
-                arquivo.unlink(missing_ok=True)
+                apagar(arquivo)
         return nome
 
     def _ffmpeg(self, exp: Exportacao, args: list[str], ao_avancar, pasta: Path | None = None) -> None:
         """Roda o ffmpeg acompanhando o progresso (segundos já gravados) e permitindo cancelar."""
         with tempfile.TemporaryFile() as erros:
-            processo = subprocess.Popen(
-                [ffmpeg(), "-hide_banner", "-nostdin", "-v", "error", "-progress", "pipe:1", "-nostats", *args],
-                stdout=subprocess.PIPE, stderr=erros, creationflags=SEM_JANELA, cwd=pasta,
-            )
+            try:
+                processo = subprocess.Popen(
+                    [ffmpeg(), "-hide_banner", "-nostdin", "-v", "error", "-progress", "pipe:1", "-nostats", *args],
+                    stdout=subprocess.PIPE, stderr=erros, creationflags=SEM_JANELA, cwd=pasta,
+                )
+            except OSError as erro:
+                raise ErroExportacao(ERRO_AO_RODAR) from erro
             exp._processo = processo
             for linha in processo.stdout:
                 chave, _, valor = linha.decode("ascii", "replace").strip().partition("=")
