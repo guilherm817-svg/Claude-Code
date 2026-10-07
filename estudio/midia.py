@@ -135,12 +135,20 @@ def _rms_db(audio: np.ndarray, taxa: int, janela_s: float = 0.02, passo_s: float
     return 20 * np.log10(rms + 1e-9), janela, passo
 
 
-# A fala é procurada em duas faixas de frequência, cada uma comparada com o ruído de fundo dela mesma: a da voz
-# (vogais e nasais) e a do chiado (s, f, x, ch). O som de ambiente se concentra nos graves e quase não tem
-# chiado, então um "s" fraco no começo ou no fim da frase aparece na segunda faixa mesmo quando some no total.
-FAIXAS_FALA = ((200, 3500), (3500, 8000))  # Hz
+# A fala é procurada em três faixas de frequência, cada uma comparada com o ruído de fundo dela mesma: os graves e os
+# agudos da voz e o chiado (s, f, x, ch). O som de ambiente se concentra nos graves e quase não tem chiado, então um
+# "s" fraco no começo ou no fim da frase aparece na faixa do chiado mesmo quando some no total. E o ambiente que só
+# fica mais alto (vento, trânsito, ar-condicionado) sobe as três por igual, enquanto a fala sobe umas mais que outras.
+FAIXAS_FALA = ((200, 1000), (1000, 3500), (3500, 8000))  # Hz
+CONTRASTE_MINIMO = 12  # dB entre o ruído e o pico: abaixo disso a fala mal passa do ruído e o corte comeria palavras
 PAUSA_DENTRO_DA_FALA = 0.3  # s: sons separados por pausas menores que isto fazem parte da mesma fala
-PALAVRA_FRACA = 0.2  # s: som contínuo, mesmo baixo, que dura isto conta como fala
+PAUSA_PALAVRA_SOLTA = 0.9  # s: a maior vírgula entre a fala e uma palavra solta ("Ei, ...", "..., tá?")
+PALAVRA_SOLTA = 0.07  # s de som que uma palavra solta tem pelo menos; um estalo dura só 20–30 ms
+SOM_BAIXO_COLADO = 0.3  # s de som bem abaixo da voz que ainda entra colado nela (consoante fraca, eco)
+PONTA_DO_CLIPE = 0.3  # s no começo e no fim do clipe onde se mede o fundo (trilha, ambiente)
+# O som no nível da voz tem de começar (ou terminar) a menos disto da borda para o aviso de palavra cortada: som fraco
+# encostado na borda (trilha, ambiente) não é palavra cortada.
+VOZ_PERTO_DA_BORDA = 0.25
 
 
 def _energia_por_faixa(audio: np.ndarray, taxa: int, janela_s: float = 0.02,
@@ -169,68 +177,133 @@ def _trechos(marcados: np.ndarray) -> list[tuple[int, int]]:
     return list(zip(np.flatnonzero(bordas == 1), np.flatnonzero(bordas == -1) - 1))
 
 
-def detectar_fala(audio: np.ndarray, taxa: int = TAXA_ANALISE) -> tuple[float, float] | None:
-    """Onde o som útil (a fala) começa e termina, em segundos.
+def _media_movel(db: np.ndarray, k: int) -> np.ndarray:
+    """Energia média de k trechos seguidos (centrada), em dB, em cada faixa."""
+    return 10 * np.log10(np.array([np.convolve(np.pad(10 ** (faixa / 10), (k // 2, k - 1 - k // 2), mode="edge"),
+                                               np.ones(k) / k, mode="valid") for faixa in db]))
 
-    Compara cada trecho de 20 ms com o ruído de fundo do próprio clipe, então funciona com o "som de ambiente"
-    que o Veo coloca por baixo da fala. Devolve None quando não há contraste (clipe mudo ou só ruído/música
-    contínua), e aí o corte automático não é aplicado.
+
+def _seguidos(marcados: np.ndarray, k: int) -> np.ndarray:
+    """Os trechos que fazem parte de alguma sequência de pelo menos k marcados."""
+    comeco = np.convolve(marcados.astype(int), np.ones(k, dtype=int), mode="valid") == k
+    return np.convolve(comeco.astype(int), np.ones(k, dtype=int))[:len(marcados)] > 0
+
+
+@dataclass
+class Fala:
+    """Onde está a fala de um clipe, em segundos."""
+    inicio: float
+    fim: float
+    voz: tuple[float, float]  # do primeiro ao último trecho no nível da voz; fora dele só há som mais fraco
+
+
+def medir_fala(audio: np.ndarray, taxa: int = TAXA_ANALISE) -> Fala | None:
+    """Onde a fala começa e termina, com a sílaba fraca, a palavra solta e o efeito sonoro logo antes dela.
+
+    Compara cada trecho de 20 ms com o ruído de fundo do próprio clipe, então funciona com o "som de ambiente" que o
+    Veo coloca por baixo da fala. Devolve None quando não dá para cortar com segurança (clipe mudo, só ruído ou
+    música contínua, ou fala quase no nível do ruído), e aí o clipe entra inteiro.
     """
     db, janela, passo = _energia_por_faixa(audio, taxa)
     n = db.shape[1]
     if n < 10 or np.percentile(_rms_db(audio, taxa)[0], 98) < -50:
         return None
-    piso = np.percentile(db, 5, axis=1, keepdims=True)
-    topo = np.percentile(db, 98, axis=1, keepdims=True)
-    com_contraste = (topo - piso >= 10)[:, 0]
-    if not com_contraste.any():
+    por_segundo = taxa / passo
+    piso_trecho = np.percentile(db, 5, axis=1, keepdims=True)
+    if (np.percentile(db, 98, axis=1, keepdims=True) - piso_trecho).max() < CONTRASTE_MINIMO:
         return None
-    db, piso, topo = db[com_contraste], piso[com_contraste], topo[com_contraste]
+    # A média de 100 ms junta as sílabas e não deixa a variação natural do ruído passar por som.
+    k = round(0.1 * por_segundo)
+    media = _media_movel(db, k)
+    piso = np.percentile(media, 5, axis=1, keepdims=True)
+    acima = media - piso
+    contraste = acima.max(axis=0) - acima.min(axis=0)  # quanto umas faixas subiram mais que as outras
+    # Nível da voz: o que o clipe passa durante meio segundo (ou metade dele, se for curto). Um efeito curto e mais
+    # alto que a fala não conta.
+    nivel_voz = np.sort(media.max(axis=0))[::-1][min(n // 2, round(0.5 * por_segundo))]
+    nivel = media.max(axis=0) - nivel_voz
 
-    # Prova de fala: 50 ms seguidos bem acima do ruído em alguma faixa. Um estalo isolado não chega a tanto.
-    forte = (db > np.maximum(piso + 10, topo - 30)).any(axis=0)
-    comeco_da_prova = np.convolve(forte.astype(int), np.ones(5, dtype=int), mode="valid") == 5
-    if not comeco_da_prova.any():
+    # Fundo: o som que o clipe tem nas duas pontas, onde ninguém fala (trilha, ambiente mais alto). Vale só o que
+    # aparece nas duas, bem abaixo da voz e no máximo 10 dB acima do ruído, para nunca esconder uma palavra.
+    fundo = np.zeros_like(piso)
+    m = round(PONTA_DO_CLIPE * por_segundo)
+    if n > 3 * m:
+        pontas = np.minimum(media[:, :m].max(axis=1, keepdims=True), media[:, -m:].max(axis=1, keepdims=True))
+        fundo = np.clip(np.minimum(pontas - 2, nivel_voz - 12) - piso, 0, 10)
+
+    # Voz clara: 50 ms seguidos 10 dB acima do ruído e do fundo, a menos de 18 dB do nível da voz e com as faixas
+    # subindo de modo diferente. Um estalo isolado não chega a tanto, nem a respiração, nem o ambiente que só subiu.
+    forte = (db > np.maximum(piso_trecho + fundo + 10, nivel_voz - 18)).any(axis=0) & (contraste >= 3)
+    clara = _seguidos(forte, 5)
+    if not clara.any():
         return None
-    prova = np.convolve(comeco_da_prova.astype(int), np.ones(5, dtype=int))[:n] > 0
 
-    # Onde há som: a média de 100 ms da energia acima do ruído. A média junta as sílabas e não deixa a variação
-    # natural do ruído passar por som; abaixo de 50 dB do mais alto do clipe é silêncio para qualquer efeito.
-    k = round(0.1 * taxa / passo)
-    media = np.array([np.convolve(np.pad(10 ** (faixa / 10), (k // 2, k - 1 - k // 2), mode="edge"),
-                                  np.ones(k) / k, mode="valid") for faixa in db])
-    media = 10 * np.log10(media)
-    limiar = np.maximum(np.percentile(media, 5, axis=1, keepdims=True) + 4,
-                        np.percentile(media, 98, axis=1, keepdims=True) - 50)
-    trechos = _trechos((media > limiar).any(axis=0))
+    # Som: passa 4 dB do ruído numa faixa, está a menos de 24 dB da voz e as faixas sobem de modo diferente (ou já está
+    # no nível da voz); ou é um estalo forte, 20 ms 18 dB acima do ruído e a menos de 16 dB da voz. Colado na voz clara
+    # vale o ruído; longe dela, conta também o fundo, para a trilha não virar som.
+    perto_da_voz = np.convolve(clara.astype(int), np.ones(2 * round(0.15 * por_segundo) + 1), mode="same") > 0
+    fundo_aqui = np.where(perto_da_voz, 0, fundo)
+    estalo = ((db - piso_trecho - fundo_aqui).max(axis=0) >= 18) & (db.max(axis=0) >= nivel_voz - 16)
+    no_nivel_da_voz = clara | estalo | ((nivel >= -10) & (contraste >= 2))
+    som = clara | (((acima - fundo_aqui) > 4).any(axis=0)
+                   & (estalo | ((nivel >= -24) & ((contraste >= 3) | no_nivel_da_voz))))
+    # Som de verdade em cada trecho de 20 ms, na voz inteira ou no chiado: nas faixas largas o ruído varia menos.
+    largas = np.vstack([10 * np.log10(10 ** (db[0] / 10) + 10 ** (db[1] / 10)), db[2]])
+    com_som = (largas > np.maximum(np.percentile(largas, 5, axis=1, keepdims=True) + 3, nivel_voz - 50)).any(axis=0)
 
-    # Conta como fala o trecho com prova de fala ou que dura uma palavra, mesmo baixinha (a primeira palavra
-    # fraca antes de uma vírgula). Tudo entre o primeiro e o último fica.
-    palavra = PALAVRA_FRACA * taxa / passo
-    fala = [i for i, (a, b) in enumerate(trechos) if prova[a:b + 1].any() or b - a + 1 >= palavra]
-    if not fala:
-        return None
-    primeiro, ultimo = fala[0], fala[-1]
-    # Sons separados por uma pausa curta entram junto: a sílaba fraca, a respiração, o splash ou o estalo que
-    # vem logo antes da primeira palavra.
-    pausa = PAUSA_DENTRO_DA_FALA * taxa / passo
-    while primeiro > 0 and trechos[primeiro][0] - trechos[primeiro - 1][1] - 1 <= pausa:
+    # Sons separados por pausas curtas formam um bloco: as sílabas, a consoante fraca, o splash ou o estalo logo antes
+    # da primeira palavra. A fala vai do primeiro ao último bloco com voz clara e leva junto a palavra solta depois de
+    # uma vírgula, mesmo fraca demais para ter voz clara: com som de palavra (não de estalo) e no nível da voz.
+    blocos = []
+    for a, b in _trechos(som):
+        if blocos and a - blocos[-1][1] - 1 <= PAUSA_DENTRO_DA_FALA * por_segundo:
+            blocos[-1][1] = b
+        else:
+            blocos.append([a, b])
+    palavra = [com_som[a:b + 1].sum() >= PALAVRA_SOLTA * por_segundo and no_nivel_da_voz[a:b + 1].any()
+               for a, b in blocos]
+    com_voz = [i for i, (a, b) in enumerate(blocos) if clara[a:b + 1].any()]
+    primeiro, ultimo = com_voz[0], com_voz[-1]
+    vao = PAUSA_PALAVRA_SOLTA * por_segundo
+    while primeiro > 0 and palavra[primeiro - 1] and blocos[primeiro][0] - blocos[primeiro - 1][1] - 1 <= vao:
         primeiro -= 1
-    while ultimo < len(trechos) - 1 and trechos[ultimo + 1][0] - trechos[ultimo][1] - 1 <= pausa:
+    while ultimo < len(blocos) - 1 and palavra[ultimo + 1] and blocos[ultimo + 1][0] - blocos[ultimo][1] - 1 <= vao:
         ultimo += 1
-    ini, fim = trechos[primeiro][0], trechos[ultimo][1]
+    ini, fim = blocos[primeiro][0], blocos[ultimo][1]
 
-    # A média começa a subir meia janela antes do som e termina meia janela depois: as bordas voltam até o
-    # primeiro e o último trecho de 20 ms que já têm som de verdade.
-    com_som = (db > np.maximum(piso + 3, topo - 50)).any(axis=0)
+    # Som bem abaixo da voz colado nela entra só se for curto (consoante fraca, eco). Mais longo é fundo: respiração,
+    # trilha.
+    nucleo = np.flatnonzero(no_nivel_da_voz[ini:fim + 1]) + ini
+    if nucleo[0] - ini > SOM_BAIXO_COLADO * por_segundo:
+        ini = nucleo[0] - k
+    if fim - nucleo[-1] > SOM_BAIXO_COLADO * por_segundo:
+        fim = nucleo[-1] + k
+
+    # A média começa a subir meia janela antes do som e termina meia janela depois: as bordas voltam até o primeiro e
+    # o último trecho de 20 ms com som de verdade. Um trecho sozinho é o próprio ruído variando.
+    borda = com_som & (np.convolve(com_som.astype(int), [1, 0, 1], mode="same") > 0)
     for _ in range(k // 2):
-        if ini < fim and not com_som[ini]:
+        if ini < fim and not borda[ini]:
             ini += 1
-        if fim > ini and not com_som[fim]:
+        if fim > ini and not borda[fim]:
             fim -= 1
-    inicio = ini * passo / taxa
-    final = (fim * passo + janela) / taxa
-    return round(float(inicio), 3), round(float(min(final, len(audio) / taxa)), 3)
+
+    def comeco(trecho: int) -> float:
+        return round(float(trecho * passo / taxa), 3)
+
+    def final(trecho: int) -> float:
+        return round(float(min((trecho * passo + janela) / taxa, len(audio) / taxa)), 3)
+
+    voz = np.flatnonzero(no_nivel_da_voz[ini:fim + 1]) + ini
+    if not len(voz):
+        voz = np.array([ini, fim])
+    return Fala(inicio=comeco(ini), fim=final(fim), voz=(comeco(voz[0]), final(voz[-1])))
+
+
+def detectar_fala(audio: np.ndarray, taxa: int = TAXA_ANALISE) -> tuple[float, float] | None:
+    """Onde o som útil (a fala) começa e termina, em segundos. None quando o clipe deve entrar inteiro."""
+    fala = medir_fala(audio, taxa)
+    return (fala.inicio, fala.fim) if fala else None
 
 
 def picos_onda(audio: np.ndarray, taxa: int = TAXA_ANALISE) -> dict:
@@ -289,7 +362,9 @@ class AnaliseClipe:
     avisos: list[dict] = field(default_factory=list)
 
 
-def avisos_do_clipe(info: InfoVideo, fala: tuple[float, float] | None, onda: dict) -> list[dict]:
+def avisos_do_clipe(info: InfoVideo, fala: tuple[float, float] | None, onda: dict,
+                    voz: tuple[float, float] | None = None) -> list[dict]:
+    """Avisos sobre o som do clipe. voz: onde o som no nível da voz começa e termina (Fala.voz), se já medido."""
     if not info.tem_audio:
         return [{"codigo": "sem_audio", "texto": "Este clipe não tem som."}]
     if fala is None:
@@ -298,10 +373,10 @@ def avisos_do_clipe(info: InfoVideo, fala: tuple[float, float] | None, onda: dic
                  "Não encontrei uma fala clara neste clipe, então ele entra inteiro, sem corte automático.")
         return [{"codigo": "sem_fala", "texto": texto}]
     avisos = []
-    if fala[0] < BORDA_SUSPEITA:
+    if fala[0] < BORDA_SUSPEITA and (voz is None or voz[0] < VOZ_PERTO_DA_BORDA):
         avisos.append({"codigo": "fala_no_inicio", "texto": "A fala começa já no primeiro quadro: a primeira "
                        "palavra pode ter saído cortada na geração. Ouça o começo antes de exportar."})
-    if fala[1] > info.duracao - BORDA_SUSPEITA:
+    if fala[1] > info.duracao - BORDA_SUSPEITA and (voz is None or voz[1] > info.duracao - VOZ_PERTO_DA_BORDA):
         avisos.append({"codigo": "fala_no_fim", "texto": "A fala vai até o último quadro: a última palavra pode "
                        "ter saído cortada na geração."})
     return avisos
@@ -310,6 +385,8 @@ def avisos_do_clipe(info: InfoVideo, fala: tuple[float, float] | None, onda: dic
 def analisar(caminho: Path) -> AnaliseClipe:
     info = sondar(caminho)
     audio = ler_audio(caminho) if info.tem_audio else np.zeros(0, dtype=np.float32)
-    fala = detectar_fala(audio)
+    medida = medir_fala(audio)
+    fala = (medida.inicio, medida.fim) if medida else None
     onda = picos_onda(audio)
-    return AnaliseClipe(info=info, fala=fala, onda=onda, avisos=avisos_do_clipe(info, fala, onda))
+    return AnaliseClipe(info=info, fala=fala, onda=onda,
+                        avisos=avisos_do_clipe(info, fala, onda, medida.voz if medida else None))
