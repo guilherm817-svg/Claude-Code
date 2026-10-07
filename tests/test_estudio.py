@@ -228,6 +228,17 @@ def test_listar_ignora_projeto_corrompido(estudio):
     assert [p.id for p in estudio.listar()] == [bom.id]
 
 
+def test_listar_ignora_projeto_que_nao_e_utf8(estudio):
+    bom = estudio.criar("Bom")
+    ruim = estudio.criar("Ação")
+    arquivo = estudio.pasta_projeto(ruim.id) / "projeto.json"
+    arquivo.write_bytes(arquivo.read_text(encoding="utf-8").encode("cp1252"))  # editor que grava em ANSI
+    assert [p.id for p in estudio.listar()] == [bom.id]
+    cliente = TestClient(criar_app(estudio), base_url="http://127.0.0.1")
+    assert [p["id"] for p in cliente.get("/api/projetos").json()] == [bom.id]
+    assert cliente.post("/api/projetos", json={}, headers=CABECALHO).status_code == 200
+
+
 # Exportação
 
 

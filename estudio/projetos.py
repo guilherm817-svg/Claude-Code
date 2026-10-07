@@ -252,11 +252,12 @@ class Estudio:
 
     def listar(self) -> list[Projeto]:
         with self._trava:
-            textos = [arquivo.read_text(encoding="utf-8") for arquivo in self.pasta.glob("*/projeto.json")]
+            # Bytes, não texto: quem decodifica é o pydantic, e um arquivo que não é UTF-8 vira ValueError lá embaixo.
+            conteudos = [arquivo.read_bytes() for arquivo in self.pasta.glob("*/projeto.json")]
         projetos = []
-        for texto in textos:
+        for conteudo in conteudos:
             try:
-                projetos.append(Projeto.model_validate_json(texto))
+                projetos.append(Projeto.model_validate_json(conteudo))
             except ValueError:
                 continue  # projeto corrompido não derruba a lista
         return sorted(projetos, key=lambda p: p.atualizado_em, reverse=True)
