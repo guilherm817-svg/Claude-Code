@@ -348,7 +348,7 @@ def whisper(monkeypatch):
 
 @pytest.fixture
 def cliente(estudio):
-    return TestClient(criar_app(estudio))
+    return TestClient(criar_app(estudio), base_url="http://127.0.0.1")
 
 
 def _esperar(cliente, trabalho):

@@ -408,8 +408,7 @@ def test_troca_tenta_de_novo_enquanto_o_antivirus_le_o_arquivo(estudio, clipe_cu
             raise PermissionError(13, "O arquivo já está sendo usado por outro processo")
         original(origem, destino)
 
-    monkeypatch.setattr(exp.os, "replace", antivirus)
-    monkeypatch.setattr(exp, "trocar", lambda origem, destino, f=exp.trocar: f(origem, destino, espera=0))
+    monkeypatch.setattr(os, "replace", antivirus)
     saida = _exportar(estudio, projeto.id)
     assert saida.exists() and len(falhas) == 4  # o trecho e o vídeo final
     assert not list(estudio.pasta_exportados(projeto.id).glob("*.tmp"))

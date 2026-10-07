@@ -322,7 +322,7 @@ def cliente(tmp_path, monkeypatch):
     for nome in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"):
         monkeypatch.setenv(nome, "")
         monkeypatch.delenv(nome)
-    return TestClient(criar_app(Estudio(tmp_path / "meus-reels")))
+    return TestClient(criar_app(Estudio(tmp_path / "meus-reels")), base_url="http://127.0.0.1")
 
 
 def _linhas(resposta) -> list[dict]:

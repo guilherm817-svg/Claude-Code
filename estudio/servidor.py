@@ -1,5 +1,6 @@
 """Servidor local do Estúdio: a API que a tela usa e os arquivos da própria tela (pasta static/)."""
 
+import mimetypes
 import os
 import subprocess
 import sys
@@ -21,6 +22,16 @@ ESTATICOS = Path(__file__).parent / "static"
 # Pedidos que mudam algo precisam deste cabeçalho. Um site qualquer aberto no navegador não consegue mandá-lo
 # para o Estúdio sem permissão (o navegador exige CORS), então só a própria tela do Estúdio altera projetos.
 CABECALHO = "x-estudio"
+# Endereços aceitos: o navegador sempre leva estes dois ao próprio computador. Outro nome (como o "testserver" dos
+# testes) é resolvido pela rede, e quem responder por ele pode apontá-lo para cá e usar a API (DNS rebinding).
+HOSTS = ("127.0.0.1", "localhost")
+# A tela não pode ser mostrada dentro de outro site (clickjacking): os cliques do usuário iriam para os botões dela.
+PROTECOES = {"X-Frame-Options": "DENY", "Content-Security-Policy": "frame-ancestors 'none'",
+             "X-Content-Type-Options": "nosniff"}
+# No Windows, o mimetypes lê os tipos do registro, onde .js às vezes aparece como text/plain; aí o navegador recusa os
+# módulos da tela e nada funciona. Estes valem mais que o registro.
+TIPOS = {".js": "text/javascript", ".css": "text/css", ".html": "text/html", ".json": "application/json",
+         ".svg": "image/svg+xml", ".ttf": "font/ttf", ".woff2": "font/woff2"}
 
 
 class NovoProjeto(BaseModel):
@@ -34,18 +45,22 @@ def _abrir_pasta(pasta: Path) -> None:
         subprocess.Popen(["open" if sys.platform == "darwin" else "xdg-open", str(pasta)])
 
 
-def criar_app(estudio: Estudio | None = None) -> FastAPI:
+def criar_app(estudio: Estudio | None = None, hosts: tuple[str, ...] = HOSTS) -> FastAPI:
     estudio = estudio or Estudio()
     exportador = Exportador(estudio)
+    for extensao, tipo in TIPOS.items():
+        mimetypes.add_type(tipo, extensao)
     app = FastAPI(title="Estúdio de Reels", docs_url=None, redoc_url=None, openapi_url=None)
     app.state.estudio, app.state.exportador = estudio, exportador
-    app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost", "testserver"])
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(hosts))
 
     @app.middleware("http")
     async def so_a_tela_altera(request: Request, call_next):
         if request.method not in ("GET", "HEAD", "OPTIONS") and request.headers.get(CABECALHO) != "1":
-            return JSONResponse({"detail": "Pedido recusado."}, status_code=403)
-        resposta = await call_next(request)
+            resposta = JSONResponse({"detail": "Pedido recusado."}, status_code=403)
+        else:
+            resposta = await call_next(request)
+        resposta.headers.update(PROTECOES)
         if request.url.path.startswith("/static/"):
             # Depois de atualizar o Estúdio, o navegador confere se a tela mudou em vez de usar a versão velha.
             resposta.headers["Cache-Control"] = "no-cache"
@@ -158,11 +173,12 @@ def criar_app(estudio: Estudio | None = None) -> FastAPI:
     @app.get("/api/projetos/{projeto_id}/exportados/{nome}")
     def baixar(projeto_id: str, nome: str):
         estudio.abrir(projeto_id)
-        pasta = estudio.pasta_exportados(projeto_id).resolve()
-        caminho = (pasta / nome).resolve()
-        if caminho.parent != pasta or caminho.suffix != ".mp4" or not caminho.is_file():
+        pasta = estudio.pasta_exportados(projeto_id)
+        # O nome pedido só vira caminho depois de conferido, como texto, com os vídeos da pasta. No Windows, só de
+        # olhar um caminho como \\servidor\pasta\x.mp4 o computador abre uma conexão de rede e entrega o login.
+        if nome not in {p.name for p in pasta.glob("*.mp4") if p.is_file()}:
             raise HTTPException(404, "Vídeo não encontrado.")
-        return FileResponse(caminho, filename=nome)
+        return FileResponse(pasta / nome, filename=nome)
 
     @app.post("/api/projetos/{projeto_id}/abrir-pasta", status_code=204)
     def abrir_pasta(projeto_id: str):

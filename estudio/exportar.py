@@ -7,20 +7,18 @@ exportação e a memória não cresce com o número de clipes.
 """
 
 import hashlib
-import os
 import re
 import shutil
 import subprocess
 import tempfile
 import threading
-import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
 from . import config, legendas
 from .midia import ERRO_AO_RODAR, SEM_JANELA, Cor, ErroMidia, ffmpeg, filtros, medir_volume, sondar
-from .projetos import Estudio, Item, Projeto, novo_id
+from .projetos import Estudio, Item, Projeto, apagar_arquivos, novo_id, trocar_arquivo
 
 PASTA_FONTES = Path(__file__).parent / "static" / "fontes"
 
@@ -196,27 +194,6 @@ def preparar_legenda(cache: Path, texto: str) -> str:
     return f"legendas/{nome}"
 
 
-def trocar(origem: Path, destino: Path, tentativas: int = 20, espera: float = 0.25) -> None:
-    """Troca atômica com novas tentativas: no Windows, o antivírus, o indexador ou o OneDrive às vezes abrem o
-    arquivo que o ffmpeg acabou de fechar, e a troca falha por alguns instantes."""
-    for n in range(tentativas):
-        try:
-            os.replace(origem, destino)
-            return
-        except PermissionError:
-            if n == tentativas - 1:
-                raise
-            time.sleep(espera)
-
-
-def apagar(arquivo: Path) -> None:
-    """Apaga se der. No Windows, um arquivo aberto por outro programa não pode ser apagado; fica para depois."""
-    try:
-        arquivo.unlink(missing_ok=True)
-    except OSError:
-        pass
-
-
 def linha_da_lista(caminho: Path) -> str:
     return "file '" + caminho.resolve().as_posix().replace("'", "'\\''") + "'"
 
@@ -362,8 +339,8 @@ class Exportador:
                                      exp, "progresso", inicio + 0.85 * min(t, d) / total), pasta=cache)
                 finally:
                     if ass:
-                        apagar(cache / ass)
-                trocar(temporario, destino)
+                        apagar_arquivos(cache / ass)
+                trocar_arquivo(temporario, destino)
             feito += duracao
             exp.progresso = 0.1 + 0.85 * feito / total
             prontos.append(destino)
@@ -379,16 +356,16 @@ class Exportador:
         try:
             self._ffmpeg(exp, comando_juntar(lista, temporario),
                          lambda t: setattr(exp, "progresso", 0.95 + 0.05 * min(t / total, 1)))
-            trocar(temporario, pasta_saida / nome)
+            trocar_arquivo(temporario, pasta_saida / nome)
         finally:
-            apagar(temporario)
+            apagar_arquivos(temporario)
 
         # Mantém no cache só os trechos desta versão: são os que a próxima exportação provavelmente reaproveita.
         # O vídeo já está pronto: um trecho velho preso por outro programa não pode virar falha da exportação.
         usados = set(prontos)
         for arquivo in pasta_trechos.glob("*.mov"):
             if arquivo not in usados:
-                apagar(arquivo)
+                apagar_arquivos(arquivo)
         return nome
 
     def _ffmpeg(self, exp: Exportacao, args: list[str], ao_avancar, pasta: Path | None = None) -> None:
