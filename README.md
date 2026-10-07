@@ -135,9 +135,21 @@ Um editor para montar Reels a partir de clipes gerados por IA (Flow/Veo, Kling, 
 
 Ele roda no seu computador, como o Analisador: os vídeos não saem da sua máquina.
 
-**Para abrir:** dê dois cliques em `iniciar-estudio.bat` (Windows) ou rode `./iniciar-estudio.sh` (Mac/Linux).
-Na primeira vez ele instala o que precisa, inclusive o ffmpeg, e depois abre no navegador
-(`http://127.0.0.1:8502`).
+**Para abrir no Mac:**
+
+1. Só na primeira vez: instale o **Python 3.12** pelo [python.org](https://www.python.org/downloads/macos/)
+   (o instalador "macOS 64-bit universal2"). O Python que já vem no Mac é antigo demais para o app.
+2. Baixe o projeto (botão **Code › Download ZIP** no GitHub) e descompacte.
+3. Dê dois cliques em **`Abrir Estúdio.command`**. Na primeira vez ele instala o que precisa, inclusive o
+   ffmpeg (alguns minutos), e depois abre o Estúdio no navegador (`http://127.0.0.1:8502`). Deixe a janela do
+   Terminal aberta enquanto usa; feche-a para encerrar.
+
+Se o Mac disser que não pode verificar o arquivo: abra **Ajustes do Sistema › Privacidade e Segurança**, role até o
+fim e clique em **Abrir Mesmo Assim** (só na primeira vez). Outro caminho: abra o Terminal, digite `bash ` (com o
+espaço), arraste o arquivo `iniciar-estudio.sh` para a janela e aperte Enter.
+
+Use o Google Chrome, que é onde o Estúdio foi testado (o Safari também deve funcionar). No Windows, abra pelo
+`iniciar-estudio.bat`; no Linux, pelo `./iniciar-estudio.sh`.
 
 **Como usar:**
 
@@ -150,7 +162,7 @@ Na primeira vez ele instala o que precisa, inclusive o ffmpeg, e depois abre no 
    pela tela.
 
 O botão de celular, embaixo da prévia, mostra onde a interface do Reels (curtir, comentar, nome e legenda) cobre
-o vídeo. Tudo é salvo sozinho, e **Ctrl+Z** desfaz qualquer edição.
+o vídeo. Tudo é salvo sozinho, e **⌘Z** (Ctrl+Z no Windows) desfaz qualquer edição.
 
 **Legendas automáticas:** com nenhum clipe selecionado, ligue **Legendas automáticas** no painel da direita. O
 Estúdio transcreve a fala de cada clipe (e dos que você importar depois) com o Whisper, no seu computador. Na
@@ -168,9 +180,9 @@ letras tortas.
 | ↑ ↓ | vai para o clipe anterior / próximo |
 | S | divide o clipe na agulha |
 | I / O | o clipe passa a começar / terminar na agulha |
-| Ctrl+D | duplica o clipe |
-| Delete | tira o clipe da linha do tempo |
-| Ctrl+Z / Ctrl+Shift+Z | desfazer / refazer |
+| ⌘D (Ctrl+D no Windows) | duplica o clipe |
+| Delete (a tecla de apagar) | tira o clipe da linha do tempo |
+| ⌘Z / ⌘⇧Z (Ctrl+Z / Ctrl+Shift+Z no Windows) | desfazer / refazer |
 | Z | mostra o vídeo inteiro na linha do tempo |
 
 ### Corretor de prompts
