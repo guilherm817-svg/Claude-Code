@@ -175,7 +175,8 @@ export class Previa {
       return;
     }
     const video = this.videoAtivo;
-    if (video.currentTime >= segmento.item.saida - 0.015 || video.ended) {
+    // Um clipe que o navegador não decodifica (o aviso já saiu) é pulado: o tempo dele nunca chegaria ao fim.
+    if (video.currentTime >= segmento.item.saida - 0.015 || video.ended || video.error) {
       if (this.indice + 1 < this.sequencia.length) {
         this._avancar();
       } else {

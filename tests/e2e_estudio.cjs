@@ -1,6 +1,10 @@
 // Teste do Estúdio de Reels num Chromium de verdade: importar, tocar, cortar, desfazer, dividir, reordenar e
-// exportar. Rode na raiz do projeto: node tests/e2e_estudio.cjs (precisa do playwright e do .venv instalado;
-// se o playwright estiver instalado globalmente, use NODE_PATH="$(npm root -g)").
+// exportar. Depois, os casos de borda da tela: arrastar a alça no painel do clipe, I e O na emenda, nome digitado sem
+// Enter, dois lotes de importação, clipe que a prévia não toca, cancelar a exportação logo no começo, salvamento que
+// falhou, régua com zoom alto e o dedo na régua (tela touch).
+// Rode na raiz do projeto: node tests/e2e_estudio.cjs (precisa do playwright e do .venv instalado;
+// se o playwright estiver instalado globalmente, use NODE_PATH="$(npm root -g)"). Com CAPTURAS=<pasta>, guarda a
+// imagem da régua com zoom alto para olhar.
 const { chromium } = require('playwright');
 const { spawn, spawnSync } = require('child_process');
 const fs = require('fs');
@@ -41,6 +45,15 @@ function gerarClipes() {
   });
 }
 
+// Um AVI (MPEG-4 parte 2): o Estúdio aceita e exporta, mas nenhum navegador consegue tocar na prévia.
+function gerarAvi() {
+  const ffmpeg = spawnSync(PYTHON, ['-c', 'from estudio.midia import ffmpeg; print(ffmpeg())'], { cwd: RAIZ, encoding: 'utf8' }).stdout.trim();
+  const destino = path.join(TEMP, 'Bloco 5 quebrado.avi');
+  const r = spawnSync(ffmpeg, ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc=s=720x1280:r=24:d=2', '-c:v', 'mpeg4', '-an', destino], { stdio: 'inherit' });
+  if (r.status !== 0) throw new Error('ffmpeg falhou ao gerar o AVI');
+  return destino;
+}
+
 async function esperarServidor() {
   for (let i = 0; i < 100; i++) {
     try {
@@ -53,6 +66,7 @@ async function esperarServidor() {
 
 (async () => {
   const clipes = gerarClipes();
+  const avi = gerarAvi();
   const servidor = spawn(PYTHON, ['-m', 'estudio', '--sem-navegador', '--porta', String(PORTA)], {
     cwd: RAIZ, env: { ...process.env, ESTUDIO_PASTA_DADOS: path.join(TEMP, 'dados') }, stdio: 'inherit',
   });
@@ -141,6 +155,220 @@ async function esperarServidor() {
     conferir(sonda[0] === 1080 && sonda[1] === 1920, 'vídeo exportado em 1080×1920', sonda);
     conferir(Math.abs(sonda[2] - esperado) < 0.1, 'duração do vídeo = soma dos cortes', { sonda: sonda[2], esperado });
     conferir(erros.length === 0, 'nenhum erro no console', erros);
+    erros.length = 0;
+
+    // Um projeto novo, aberto pela tela, com os clipes pedidos.
+    const criarProjeto = (nome) => pagina.evaluate(async (n) => {
+      const resposta = await fetch('/api/projetos', {
+        method: 'POST', headers: { 'X-Estudio': '1', 'Content-Type': 'application/json' }, body: JSON.stringify({ nome: n }),
+      });
+      return (await resposta.json()).id;
+    }, nome);
+    const abrirNovoProjeto = async (nome, arquivos) => {
+      const id = await criarProjeto(nome);
+      await pagina.evaluate((i) => localStorage.setItem('estudio.ultimoProjeto', JSON.stringify(i)), id);
+      await pagina.reload();
+      await pagina.waitForFunction((n) => document.querySelector('#nome-projeto').value === n, nome);
+      if (arquivos.length) {
+        await pagina.setInputFiles('#arquivos', arquivos);
+        await pagina.waitForFunction((k) => document.querySelectorAll('.clipe').length === k, arquivos.length, { timeout: 60000 });
+      }
+      await esperarSalvo();
+      return id;
+    };
+    const projetoDe = (id) => pagina.evaluate(async (i) => (await fetch(`/api/projetos/${i}`)).json(), id);
+    const cortes = (proj) => proj.linha.map((i) => [i.entrada, i.saida]);
+
+    console.log('Cortar arrastando a alça no painel do clipe');
+    const idCorte = await abrirNovoProjeto('Corte no painel', clipes);
+    let q = await projetoDe(idCorte);
+    await (await pagina.$$('.clipe'))[0].click({ position: { x: 40, y: 30 } });
+    const editor = await pagina.waitForSelector('#inspetor canvas.editor-corte');
+    await sleep(200);
+    const caixaEditor = await editor.boundingBox();
+    const [item0] = q.linha;
+    const ppsEditor = caixaEditor.width / q.midias.find((m) => m.id === item0.midia_id).duracao;
+    const xAlca = caixaEditor.x + item0.saida * ppsEditor;
+    const yEditor = caixaEditor.y + caixaEditor.height / 2;
+    await pagina.mouse.move(xAlca, yEditor);
+    await pagina.mouse.down();
+    await pagina.mouse.move(xAlca - 0.8 * ppsEditor, yEditor, { steps: 8 });
+    const resumoNoArrasto = await pagina.textContent('.resumo-corte');
+    const mesmoEditor = await editor.evaluate((canvas) => canvas.isConnected);
+    await pagina.mouse.up();
+    await esperarSalvo();
+    q = await projetoDe(idCorte);
+    conferir(Math.abs(q.linha[0].saida - (item0.saida - 0.8)) < 0.05, 'arrastar a alça do painel corta o fim até onde o mouse soltou e salva',
+      { antes: item0.saida, depois: q.linha[0].saida });
+    conferir(mesmoEditor && resumoNoArrasto.includes(`Usando ${(q.linha[0].saida - item0.entrada).toFixed(2).replace('.', ',')} s`),
+      'o painel acompanha o arrasto sem trocar o editor de corte', { mesmoEditor, resumoNoArrasto });
+    await pagina.keyboard.press('Control+z');
+    await esperarSalvo();
+    q = await projetoDe(idCorte);
+    conferir(q.linha.length === 3 && Math.abs(q.linha[0].saida - item0.saida) < 0.001, 'Ctrl+Z desfaz o corte feito no painel (e só ele)', cortes(q));
+
+    console.log('I e O perto da emenda entre dois clipes');
+    const cortesOriginais = JSON.stringify(cortes(q));
+    let clipeA = await (await pagina.$$('.clipe'))[0].boundingBox();
+    await pagina.mouse.click(clipeA.x + 40, clipeA.y + 30); // o painel é do primeiro clipe
+    await pagina.keyboard.press('ArrowDown'); // agulha exatamente no começo do segundo
+    await pagina.keyboard.press('o');
+    await pagina.click('#inspetor button:has-text("Fim na agulha")');
+    await pagina.click('#inspetor button:has-text("Início na agulha")');
+    await esperarSalvo();
+    q = await projetoDe(idCorte);
+    conferir(JSON.stringify(cortes(q)) === cortesOriginais, 'O e os botões do painel com a agulha na emenda não cortam o clipe seguinte', cortes(q));
+    const painelDoPrimeiro = await pagina.textContent('#inspetor .clipe-titulo');
+    conferir(painelDoPrimeiro === 'Bloco 1.webm', 'o painel continua no clipe em que os botões foram clicados', painelDoPrimeiro);
+    let seguinteMudou = 0;
+    for (const fracao of [0.15, 0.27, 0.38, 0.52, 0.66, 0.79]) {
+      clipeA = await (await pagina.$$('.clipe'))[0].boundingBox();
+      await pagina.mouse.click(clipeA.x + clipeA.width * fracao, clipeA.y + 30);
+      for (let k = 0; k < 3; k++) await pagina.keyboard.press('o'); // a tecla segurada se repete
+      await esperarSalvo();
+      q = await projetoDe(idCorte);
+      if (JSON.stringify(cortes(q)[1]) !== JSON.stringify(JSON.parse(cortesOriginais)[1])) seguinteMudou++;
+      await pagina.keyboard.press('Control+z');
+      await esperarSalvo();
+    }
+    q = await projetoDe(idCorte);
+    conferir(seguinteMudou === 0 && JSON.stringify(cortes(q)) === cortesOriginais, 'O repetido corta só o clipe da agulha, uma vez (um Ctrl+Z desfaz)',
+      { seguinteMudou, cortes: cortes(q) });
+
+    console.log('Nome digitado sem Enter e troca de projeto');
+    const idB = await criarProjeto('Projeto B');
+    await pagina.fill('#nome-projeto', 'Nome novo do A');
+    await pagina.click('#btn-projetos');
+    await pagina.click('#menu-projetos .menu-item:has-text("Projeto B")');
+    await pagina.waitForFunction(() => document.querySelector('#nome-projeto').value === 'Projeto B', null, { timeout: 5000 }).catch(() => {});
+    await esperarSalvo();
+    const nomesDe = (ids) => pagina.evaluate((lista) => Promise.all(lista.map(async (i) => (await (await fetch(`/api/projetos/${i}`)).json()).nome)), ids);
+    let nomesSalvos = await nomesDe([idCorte, idB]);
+    conferir(nomesSalvos.join('|') === 'Nome novo do A|Projeto B', 'o nome digitado sem Enter fica no projeto em que foi digitado', nomesSalvos);
+    conferir(await pagina.inputValue('#nome-projeto') === 'Projeto B', 'o campo mostra o nome do projeto aberto', await pagina.inputValue('#nome-projeto'));
+    await pagina.fill('#nome-projeto', 'Projeto B2');
+    const regua = await (await pagina.$('.regua')).boundingBox();
+    await pagina.mouse.click(regua.x + 50, regua.y + 10);
+    await esperarSalvo();
+    nomesSalvos = await nomesDe([idCorte, idB]);
+    conferir(await pagina.evaluate(() => document.activeElement.id !== 'nome-projeto') && nomesSalvos[1] === 'Projeto B2',
+      'clicar na régua tira o cursor do nome e confirma o nome digitado', nomesSalvos);
+
+    console.log('Dois lotes importados ao mesmo tempo');
+    const idLotes = await abrirNovoProjeto('Lotes', []);
+    const webm = fs.readFileSync(clipes[0]);
+    const lote = (numeros) => numeros.map((n) => ({ name: `Lote ${n}.webm`, mimeType: 'video/webm', buffer: webm }));
+    // Cada envio demora, como o de um clipe de 8 s de verdade: o segundo lote chega com o primeiro no meio.
+    await pagina.route('**/midias', async (rota) => { await sleep(300); await rota.continue(); });
+    await pagina.setInputFiles('#arquivos', lote([1, 2, 3]));
+    await sleep(50);
+    await pagina.setInputFiles('#arquivos', lote([4, 5, 6]));
+    await pagina.waitForFunction(() => document.querySelectorAll('.clipe').length === 6, null, { timeout: 60000 });
+    await esperarSalvo();
+    await pagina.unroute('**/midias');
+    q = await projetoDe(idLotes);
+    conferir(nomes(q).join('|') === [1, 2, 3, 4, 5, 6].map((n) => `Lote ${n}.webm`).join('|'), 'o segundo lote entra inteiro depois do primeiro, sem intercalar', nomes(q));
+
+    console.log('Prévia com um clipe que o navegador não toca');
+    await abrirNovoProjeto('Com AVI', [clipes[0], avi, clipes[2]]);
+    await pagina.click('#btn-tocar');
+    const chegouAoFim = await pagina.waitForFunction(() => document.querySelector('#btn-tocar').title.startsWith('Tocar')
+      && document.querySelector('#tempo-atual').textContent === document.querySelector('#tempo-total').textContent, null, { timeout: 20000 })
+      .then(() => true, () => false);
+    conferir(chegouAoFim, 'a prévia pula o clipe que não toca e vai até o fim', await pagina.textContent('#tempo-atual'));
+    if (!chegouAoFim) await pagina.click('#btn-tocar');
+
+    console.log('Cancelar a exportação logo no começo');
+    // O pedido de exportação demora a voltar, como quando ele espera uma importação terminar.
+    await pagina.route('**/exportar', async (rota) => { await sleep(1500); await rota.continue(); });
+    await pagina.click('#btn-exportar');
+    await pagina.click('#btn-iniciar-exportacao');
+    await pagina.click('#btn-cancelar-exportacao');
+    await pagina.keyboard.press('Escape');
+    const abertaDepoisDoEsc = await pagina.$eval('#dialogo-exportar', (d) => d.open);
+    await pagina.waitForFunction(() => !document.querySelector('#btn-iniciar-exportacao').hidden, null, { timeout: 60000 });
+    conferir(abertaDepoisDoEsc, 'Esc não fecha a janela enquanto a exportação começa');
+    conferir(await pagina.$eval('#exportar-pronto', (e) => e.hidden), 'Cancelar antes de o servidor responder cancela a exportação');
+    await pagina.unroute('**/exportar');
+    if (await pagina.$eval('#dialogo-exportar', (d) => d.open)) await pagina.click('#btn-fechar-exportacao');
+
+    console.log('Salvamento que falhou');
+    await pagina.route('**/api/projetos/*', (rota) => (rota.request().method() === 'PUT' ? rota.abort() : rota.continue()));
+    await pagina.keyboard.press('Escape');
+    await pagina.click('text=Igualar o volume');
+    await pagina.waitForFunction(() => document.querySelector('#estado-salvo').textContent === 'Não salvo');
+    await sleep(1500); // o Estúdio continua fora do ar por um tempo
+    await pagina.unroute('**/api/projetos/*');
+    const salvouSozinho = await pagina.waitForFunction(() => document.querySelector('#estado-salvo').textContent === 'Tudo salvo', null, { timeout: 15000 })
+      .then(() => true, () => false);
+    q = await projetoDe(await pagina.evaluate(() => JSON.parse(localStorage.getItem('estudio.ultimoProjeto'))));
+    conferir(salvouSozinho && q.igualar_volume === false, 'o salvamento que falhou é tentado de novo sozinho', { salvouSozinho, igualar: q.igualar_volume });
+    await pagina.route('**/api/projetos/*', (rota) => (rota.request().method() === 'PUT' ? rota.abort() : rota.continue()));
+    await pagina.click('text=Igualar o volume');
+    await pagina.waitForFunction(() => document.querySelector('#estado-salvo').textContent === 'Não salvo');
+    const avisaAoFechar = await pagina.evaluate(() => {
+      const evento = new Event('beforeunload', { cancelable: true });
+      window.dispatchEvent(evento);
+      return evento.defaultPrevented;
+    });
+    conferir(avisaAoFechar, 'com um salvamento que falhou, fechar a aba pede confirmação');
+    await pagina.unroute('**/api/projetos/*');
+    await pagina.waitForFunction(() => document.querySelector('#estado-salvo').textContent === 'Tudo salvo', null, { timeout: 15000 }).catch(() => {});
+
+    console.log('Régua com zoom alto');
+    await pagina.evaluate(() => {
+      const original = CanvasRenderingContext2D.prototype.fillText;
+      window.rotulosDaRegua = [];
+      CanvasRenderingContext2D.prototype.fillText = function fillText(texto, ...resto) {
+        if (this.canvas.classList.contains('regua')) window.rotulosDaRegua.push(texto);
+        return original.call(this, texto, ...resto);
+      };
+    });
+    await pagina.$eval('.zoom', (controle) => { controle.value = '1000'; controle.dispatchEvent(new Event('input')); });
+    const rotulos = await pagina.evaluate(() => window.rotulosDaRegua);
+    const emQuartos = (rotulo) => {
+      const [minutos, segs] = rotulo.split(':').map(Number);
+      return Number.isInteger(Math.round((minutos * 60 + segs) * 1e6) / 1e6 * 4);
+    };
+    conferir(rotulos.length > 3 && rotulos.every(emQuartos) && rotulos.some((r) => /\.(25|75)$/.test(r)),
+      'com zoom máximo, a régua marca cada 0,25 s com o número certo', rotulos.slice(0, 8));
+    if (process.env.CAPTURAS) await pagina.screenshot({ path: path.join(process.env.CAPTURAS, 'regua-zoom.png'), clip: { x: 0, y: regua.y - 40, width: 1440, height: 180 } });
+
+    console.log('Arrastar o dedo na régua e na trilha (tela touch)');
+    const contextoToque = await navegador.newContext({ viewport: { width: 1440, height: 900 }, hasTouch: true });
+    await contextoToque.addInitScript((i) => localStorage.setItem('estudio.ultimoProjeto', JSON.stringify(i)), idCorte);
+    const toque = await contextoToque.newPage();
+    toque.on('pageerror', (e) => erros.push(e.message));
+    await toque.goto(BASE);
+    await toque.waitForSelector('.clipe');
+    const cdp = await contextoToque.newCDPSession(toque);
+    const arrastarDedo = async (x, y, dx) => {
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
+      for (let i = 1; i <= 12; i++) {
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: x + (dx * i) / 12, y }] });
+        await sleep(16);
+      }
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+      await sleep(200);
+    };
+    const passarMouse = async (y) => {
+      const antes = await toque.textContent('#tempo-atual');
+      await toque.mouse.move(400, y);
+      await toque.mouse.move(1000, y, { steps: 6 });
+      return [antes, await toque.textContent('#tempo-atual')];
+    };
+    const reguaToque = await (await toque.$('.regua')).boundingBox();
+    await arrastarDedo(reguaToque.x + 700, reguaToque.y + 12, -300);
+    const [depoisDoDedo, depoisDoMouse] = await passarMouse(reguaToque.y + 12);
+    conferir(depoisDoDedo !== '0:00.0' && depoisDoMouse === depoisDoDedo, 'o dedo na régua move a agulha, e depois passar o mouse não move', { depoisDoDedo, depoisDoMouse });
+    const ultimoClipe = await (await toque.$$('.clipe')).at(-1).boundingBox();
+    await arrastarDedo(ultimoClipe.x + ultimoClipe.width + 20, ultimoClipe.y + 40, -250);
+    const [antesDoMouse, depoisDoMouseNaTrilha] = await passarMouse(ultimoClipe.y + 40);
+    conferir(antesDoMouse === depoisDoMouseNaTrilha, 'depois de rolar a trilha com o dedo, passar o mouse não move a agulha', { antesDoMouse, depoisDoMouseNaTrilha });
+    await contextoToque.close();
+
+    const errosNovos = erros.filter((e) => !e.includes('Failed to load resource')); // o salvamento derrubado de propósito
+    conferir(errosNovos.length === 0, 'nenhum erro no console nos casos de borda', errosNovos);
   } catch (erro) {
     falhas++;
     console.log('  FAIL', erro.message);

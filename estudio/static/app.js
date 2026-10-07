@@ -22,7 +22,7 @@ const estado = {
   importando: [],
   errosDePrevia: new Set(),
   edicao: null,
-  salvar: { timer: null, emAndamento: null, erro: false },
+  salvar: { timer: null, emAndamento: null, erro: false, falhas: 0 },
 };
 
 // Utilidades do projeto
@@ -147,11 +147,18 @@ async function salvarAgora(aoSair = false) {
     const salvo = await api.salvar(projeto, { semLegendasDe: () => legendas.emTranscricao(projeto.id), aoSair });
     projeto.atualizado_em = salvo.atualizado_em;
     estado.salvar.erro = false;
+    estado.salvar.falhas = 0;
     if (!estado.salvar.timer) mostrarSalvamento('Tudo salvo');
   } catch (erro) {
     estado.salvar.erro = true;
+    estado.salvar.falhas += 1;
     mostrarSalvamento('Não salvo', 'erro');
-    avisar(`Não consegui salvar: ${erro.message}`, 'erro');
+    if (estado.salvar.falhas === 1) avisar(`Não consegui salvar: ${erro.message}`, 'erro');
+    // Tenta de novo sozinho, esperando cada vez mais (1 s, 2 s, 4 s... até 30 s): a janela do Estúdio pode ter sido
+    // fechada por um instante e aberta de novo.
+    if (!estado.salvar.timer && estado.projeto === projeto) {
+      estado.salvar.timer = setTimeout(salvarAgora, Math.min(30000, 1000 * 2 ** (estado.salvar.falhas - 1)));
+    }
   }
 }
 
@@ -188,6 +195,7 @@ function selecionar(id, tempo) {
 
 function aparar(id, lado, valor) {
   const item = estado.projeto.linha.find((i) => i.id === id);
+  if (!item) return; // saiu da linha no meio do arrasto (Delete, Ctrl+Z)
   const midia = midiaDe(item.midia_id);
   if (lado === 'inicio') item.entrada = round3(limitar(valor, 0, item.saida - DURACAO_MINIMA));
   else item.saida = round3(limitar(valor, item.entrada + DURACAO_MINIMA, midia.duracao));
@@ -257,10 +265,24 @@ function dividirNaAgulha() {
   atualizar();
 }
 
-// I e O: o clipe embaixo da agulha passa a começar (ou terminar) ali.
-function marcarNaAgulha(lado) {
-  const segmento = segmentoEm(previa.tempo) || (previa.tempo >= previa.total && sequencia().at(-1));
-  if (!segmento) return;
+// A agulha serve para marcar o início (ou o fim) deste trecho. Na emenda entre dois clipes, o fim é do clipe que
+// termina ali e o início do que começa ali: senão o O repetido cortaria o clipe seguinte. A folga cobre o
+// arredondamento do corte em milésimos, que pode deixar a agulha um pouco depois do fim que acabou de ser marcado.
+function agulhaMarca(segmento, lado) {
+  const t = previa.tempo;
+  const fim = segmento.inicio + segmento.duracao;
+  return lado === 'inicio' ? t >= segmento.inicio - 0.001 && t < fim - 0.001 : t > segmento.inicio + 0.001 && t <= fim + 0.001;
+}
+
+// I e O: o clipe embaixo da agulha passa a começar (ou terminar) ali. Os botões do painel passam `item` e só mexem
+// nesse clipe.
+function marcarNaAgulha(lado, item = null) {
+  const seq = sequencia();
+  const segmento = seq.find((s) => (!item || s.item.id === item.id) && agulhaMarca(s, lado));
+  if (!segmento) {
+    if (seq.length) avisar(`Leve a agulha para dentro ${item ? 'deste' : 'de um'} clipe primeiro.`);
+    return;
+  }
   const ponto = segmento.item.entrada + (previa.tempo - segmento.inicio);
   editar((p) => {
     const item = p.linha.find((i) => i.id === segmento.item.id);
@@ -314,7 +336,9 @@ function irParaClipe(direcao) {
 
 // Importação
 
-async function importar(arquivos) {
+let filaDeImportacao = Promise.resolve();
+
+function importar(arquivos) {
   const aceitas = estado.config.extensoes;
   const lista = [...arquivos].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR', { numeric: true }));
   const validos = lista.filter((a) => aceitas.some((ext) => a.name.toLowerCase().endsWith(ext)));
@@ -323,14 +347,22 @@ async function importar(arquivos) {
       + `${aceitas.map((e) => e.slice(1).toUpperCase()).join(', ')}).`, 'erro');
   }
   if (!validos.length) return;
-  await garantirSalvo();
+  const tarefas = validos.map((arquivo) => ({ id: novoId(), arquivo, nome: arquivo.name, progresso: 0, analisando: false, naFila: true }));
+  estado.importando.push(...tarefas);
+  desenharImportacoes();
+  // Um lote solto enquanto outro ainda chega espera a vez dele inteiro: senão os clipes dos dois se intercalam na linha.
   const projetoId = estado.projeto.id;
-  for (const arquivo of validos) {
-    const tarefa = { id: novoId(), nome: arquivo.name, progresso: 0, analisando: false };
-    estado.importando.push(tarefa);
+  const lote = filaDeImportacao.then(() => importarLote(projetoId, tarefas));
+  filaDeImportacao = lote.catch(() => {});
+}
+
+async function importarLote(projetoId, tarefas) {
+  await garantirSalvo();
+  for (const tarefa of tarefas) {
+    tarefa.naFila = false;
     desenharImportacoes();
     try {
-      const resposta = await api.importar(projetoId, arquivo, (p) => {
+      const resposta = await api.importar(projetoId, tarefa.arquivo, (p) => {
         tarefa.progresso = p;
         tarefa.analisando = p >= 1;
         desenharImportacoes();
@@ -361,7 +393,7 @@ async function importar(arquivos) {
 function desenharImportacoes() {
   const caixa = $('#importacoes');
   caixa.replaceChildren(...estado.importando.map((t) => el('div', { class: 'importacao' },
-    el('div', { class: 'importacao-nome' }, t.analisando ? `Analisando ${t.nome}…` : `Enviando ${t.nome}`),
+    el('div', { class: 'importacao-nome' }, t.analisando ? `Analisando ${t.nome}…` : t.naFila ? `Na fila: ${t.nome}` : `Enviando ${t.nome}`),
     el('div', { class: 'barra' }, el('span', { style: { width: `${Math.round(t.progresso * 100)}%` } })))));
 }
 
@@ -454,12 +486,28 @@ function campoDeCorte(item, lado, rotulo) {
       el('button', { class: 'botao-icone pequeno', title: 'Um quadro para a frente', onclick: () => ajustarCorte(item, lado, QUADRO) }, '+')));
 }
 
+function resumoDoCorte(item, midia) {
+  const removido = item.entrada + (midia.duracao - item.saida);
+  return `Usando ${segundos(item.saida - item.entrada)} de ${segundos(midia.duracao)}`
+    + (removido > 0.005 ? ` · ${segundos(removido)} cortados` : '');
+}
+
+// Arrasto de uma alça do editor de corte do painel: { item, desenhar }. Enquanto ele dura, o painel não é refeito
+// (o canvas sairia da página no meio do arrasto, e o arrasto se perderia); só o desenho e os números mudam.
+let arrastoNoPainel = null;
+
 function desenharInspetor() {
   const painel = $('#inspetor');
   const item = itemSelecionado();
   // Quem está corrigindo o texto da legenda deste clipe não perde o cursor. Um campo de outro clipe (ou de um que
   // saiu da linha) encerra a correção e dá lugar à seleção atual.
   if (legendas.corrigindo(item)) return;
+  if (item && arrastoNoPainel?.item === item) {
+    painel.querySelector('.resumo-corte').textContent = resumoDoCorte(item, midiaDe(item.midia_id));
+    painel.querySelectorAll('.campo-corte output').forEach((valor, i) => { valor.textContent = segundos(i ? item.saida : item.entrada); });
+    arrastoNoPainel.desenhar();
+    return;
+  }
   legendas.concluirEdicao(true);
   if (!item) {
     painel.replaceChildren(...painelDoProjeto());
@@ -469,15 +517,12 @@ function desenharInspetor() {
   const avisos = avisosDaMidia(midia);
   const [entradaSugerida, saidaSugerida] = corteSugerido(midia);
   const jaSugerido = Math.abs(item.entrada - entradaSugerida) < 0.002 && Math.abs(item.saida - saidaSugerida) < 0.002;
-  const removido = item.entrada + (midia.duracao - item.saida);
   painel.replaceChildren(
     el('div', { class: 'painel-titulo' }, 'Clipe selecionado',
       el('button', { class: 'botao-icone pequeno', title: 'Fechar (Esc)', onclick: () => selecionar(null) }, icone('fechar', 14))),
     el('div', { class: 'inspetor-corpo' },
       el('h3', { class: 'clipe-titulo' }, midia.nome),
-      el('p', { class: 'resumo-corte' },
-        `Usando ${segundos(item.saida - item.entrada)} de ${segundos(midia.duracao)}`,
-        removido > 0.005 ? ` · ${segundos(removido)} cortados` : ''),
+      el('p', { class: 'resumo-corte' }, resumoDoCorte(item, midia)),
       editorDeCorte(item, midia),
       el('div', { class: 'cortes' }, campoDeCorte(item, 'inicio', 'Começa em'), campoDeCorte(item, 'fim', 'Termina em')),
       el('div', { class: 'grade-botoes' },
@@ -485,8 +530,8 @@ function desenharInspetor() {
           title: 'Corta o silêncio antes da primeira e depois da última palavra' }, icone('raio', 15), 'Cortar silêncio'),
         el('button', { class: 'botao', disabled: item.entrada === 0 && item.saida === midia.duracao, onclick: () => usarClipeInteiro(item) },
           icone('expandir', 15), 'Clipe inteiro'),
-        el('button', { class: 'botao', onclick: () => marcarNaAgulha('inicio'), title: 'O clipe passa a começar na agulha (I)' }, icone('marcarInicio', 15), 'Início na agulha'),
-        el('button', { class: 'botao', onclick: () => marcarNaAgulha('fim'), title: 'O clipe passa a terminar na agulha (O)' }, icone('marcarFim', 15), 'Fim na agulha')),
+        el('button', { class: 'botao', onclick: () => marcarNaAgulha('inicio', item), title: 'O clipe passa a começar na agulha (I)' }, icone('marcarInicio', 15), 'Início na agulha'),
+        el('button', { class: 'botao', onclick: () => marcarNaAgulha('fim', item), title: 'O clipe passa a terminar na agulha (O)' }, icone('marcarFim', 15), 'Fim na agulha')),
       avisos.length ? el('div', { class: 'lista-avisos' }, ...avisos.map((texto) => el('p', { class: 'aviso' }, icone('alerta', 14), el('span', {}, texto)))) : null,
       legendas.secaoDoClipe(item, midia),
       el('dl', { class: 'ficha' },
@@ -500,7 +545,7 @@ function desenharInspetor() {
 // Visão do clipe inteiro, com a parte usada clara e as alças de corte arrastáveis.
 function editorDeCorte(item, midia) {
   const canvas = el('canvas', { class: 'editor-corte', 'aria-label': 'Corte do clipe: arraste as alças' });
-  requestAnimationFrame(() => {
+  const desenhar = () => {
     const largura = canvas.clientWidth || 260;
     const altura = 76;
     const densidade = Math.min(window.devicePixelRatio || 1, 2);
@@ -527,8 +572,10 @@ function editorDeCorte(item, midia) {
       ctx.fillStyle = '#f43f5e';
       ctx.fillRect(Math.round((item.entrada + previa.tempo - segmento.inicio) * pps) - 1, 0, 2, altura);
     }
-  });
+  };
+  requestAnimationFrame(desenhar);
   canvas.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
     const largura = canvas.clientWidth;
     const pps = largura / midia.duracao;
     const x = e.clientX - canvas.getBoundingClientRect().left;
@@ -543,12 +590,21 @@ function editorDeCorte(item, midia) {
     e.preventDefault();
     canvas.setPointerCapture(e.pointerId);
     comecarEdicao();
-    const mover = (ev) => aparar(item.id, lado, (ev.clientX - canvas.getBoundingClientRect().left) / pps);
-    canvas.addEventListener('pointermove', mover);
-    canvas.addEventListener('pointerup', () => {
-      canvas.removeEventListener('pointermove', mover);
+    arrastoNoPainel = { item, desenhar };
+    // Na janela, e não no canvas: o arrasto termina (e entra no desfazer) mesmo que o ponteiro saia dele.
+    const fim = new AbortController();
+    const doArrasto = (ev) => ev.pointerId === e.pointerId;
+    window.addEventListener('pointermove', (ev) => {
+      if (doArrasto(ev)) aparar(item.id, lado, (ev.clientX - canvas.getBoundingClientRect().left) / pps);
+    }, { signal: fim.signal });
+    const soltar = (ev) => {
+      if (!doArrasto(ev)) return;
+      fim.abort();
+      arrastoNoPainel = null;
       terminarEdicao();
-    }, { once: true });
+    };
+    window.addEventListener('pointerup', soltar, { signal: fim.signal });
+    window.addEventListener('pointercancel', soltar, { signal: fim.signal });
   });
   canvas.addEventListener('pointermove', (e) => {
     const pps = canvas.clientWidth / midia.duracao;
@@ -655,24 +711,31 @@ async function desenharExportados() {
 }
 
 let exportacaoAtual = null;
+// Do clique em Exportar até o fim, inclusive antes de o servidor responder com o número da exportação (o pedido pode
+// esperar na fila atrás de uma importação): Cancelar e Esc já valem nesse intervalo.
+let exportando = false;
+let cancelarExportacao = false;
 
 async function iniciarExportacao() {
-  await garantirSalvo();
+  if (exportando) return;
+  exportando = true;
+  cancelarExportacao = false;
   mostrarFaseExportacao('rodando');
   const barra = $('#exportar-progresso .barra span');
   const etapa = $('#exportar-etapa');
   barra.style.width = '0%';
   etapa.textContent = 'Preparando…';
   try {
-    let exportacao = await api.exportar(estado.projeto.id);
-    exportacaoAtual = exportacao.id;
+    await garantirSalvo();
+    let exportacao = cancelarExportacao ? { estado: 'cancelada' } : await api.exportar(estado.projeto.id);
+    exportacaoAtual = exportacao.id ?? null;
+    if (cancelarExportacao && exportacaoAtual) await api.cancelar(exportacaoAtual); // pedido enquanto o servidor não respondia
     while (exportacao.estado === 'preparando' || exportacao.estado === 'renderizando') {
       barra.style.width = `${Math.round(exportacao.progresso * 100)}%`;
-      etapa.textContent = `${exportacao.etapa} ${Math.round(exportacao.progresso * 100)}%`;
+      etapa.textContent = cancelarExportacao ? 'Cancelando…' : `${exportacao.etapa} ${Math.round(exportacao.progresso * 100)}%`;
       await new Promise((r) => setTimeout(r, 400));
       exportacao = await api.exportacao(exportacao.id);
     }
-    exportacaoAtual = null;
     if (exportacao.estado === 'pronta') {
       const link = $('#link-baixar');
       link.href = api.urlExportado(estado.projeto.id, exportacao.arquivo);
@@ -688,20 +751,47 @@ async function iniciarExportacao() {
       avisar(exportacao.erro || 'A exportação falhou.', 'erro', 10000);
     }
   } catch (erro) {
-    exportacaoAtual = null;
     mostrarFaseExportacao('inicio');
     avisar(erro.message, 'erro', 8000);
+  } finally {
+    exportacaoAtual = null;
+    exportando = false;
   }
+}
+
+function pedirCancelamento() {
+  cancelarExportacao = true;
+  $('#exportar-etapa').textContent = 'Cancelando…';
+  if (exportacaoAtual) api.cancelar(exportacaoAtual).catch((erro) => avisar(erro.message, 'erro'));
 }
 
 // Projetos
 
+// O nome digitado vale para o projeto aberto. Só o topo é redesenhado: isto pode rodar no clique de um botão do
+// painel, que, trocado, perderia o clique.
+function confirmarNome() {
+  const campo = $('#nome-projeto');
+  const valor = campo.value.trim().slice(0, 120);
+  if (!valor) {
+    campo.value = estado.projeto.nome;
+    return;
+  }
+  const antes = instantaneo();
+  estado.projeto.nome = valor;
+  guardarPasso(antes);
+  desenharTopo();
+}
+
 async function abrirProjeto(id) {
   legendas.concluirEdicao(true); // a correção em andamento é do projeto que está saindo
+  $('#nome-projeto').blur(); // e o nome digitado sem Enter também
   await garantirSalvo();
   previa.pausar();
   const projeto = await api.abrir(id);
   estado.projeto = projeto;
+  // Uma nova tentativa de salvar o projeto que saiu não pode gravar este no lugar dele.
+  clearTimeout(estado.salvar.timer);
+  Object.assign(estado.salvar, { timer: null, erro: false, falhas: 0 });
   estado.selecionado = null;
   estado.desfazer = [];
   estado.refazer = [];
@@ -729,7 +819,7 @@ async function excluirProjeto() {
   if (!confirm(`Excluir o projeto “${estado.projeto.nome}”? Os clipes importados e os vídeos exportados dele `
     + 'também são apagados. Isso não dá para desfazer.')) return;
   clearTimeout(estado.salvar.timer);
-  estado.salvar.timer = null;
+  Object.assign(estado.salvar, { timer: null, erro: false, falhas: 0 });
   await api.excluir(estado.projeto.id);
   const restantes = await api.listar();
   if (restantes.length) await abrirProjeto(restantes[0].id);
@@ -902,15 +992,13 @@ function montarEventos() {
   });
 
   const nome = $('#nome-projeto');
-  nome.addEventListener('change', () => {
-    const valor = nome.value.trim();
-    if (!valor) {
-      nome.value = estado.projeto.nome;
-      return;
-    }
-    editar((p) => { p.nome = valor.slice(0, 120); });
-  });
+  nome.addEventListener('change', confirmarNome);
   nome.addEventListener('keydown', (e) => { if (e.key === 'Enter') nome.blur(); });
+  // Clicar em qualquer outro lugar confirma o nome, também onde o clique não tira o cursor do campo (botões, régua,
+  // trilha): senão o Espaço e os atalhos continuariam indo para o nome, e o texto iria junto para outro projeto.
+  document.addEventListener('pointerdown', (e) => {
+    if (document.activeElement === nome && e.target !== nome) nome.blur();
+  }, true);
 
   $('#btn-projetos').addEventListener('click', (e) => { e.stopPropagation(); alternarMenuProjetos(); });
   document.addEventListener('click', (e) => {
@@ -920,9 +1008,9 @@ function montarEventos() {
   $('#btn-refazer').addEventListener('click', refazer);
   $('#btn-exportar').addEventListener('click', abrirExportacao);
   $('#btn-iniciar-exportacao').addEventListener('click', iniciarExportacao);
-  $('#btn-cancelar-exportacao').addEventListener('click', () => exportacaoAtual && api.cancelar(exportacaoAtual));
+  $('#btn-cancelar-exportacao').addEventListener('click', pedirCancelamento);
   $('#btn-fechar-exportacao').addEventListener('click', () => $('#dialogo-exportar').close());
-  $('#dialogo-exportar').addEventListener('cancel', (e) => { if (exportacaoAtual) e.preventDefault(); });
+  $('#dialogo-exportar').addEventListener('cancel', (e) => { if (exportando) e.preventDefault(); });
   $('#btn-abrir-pasta').addEventListener('click', () => api.abrirPasta(estado.projeto.id).catch((erro) => avisar(erro.message, 'erro')));
 
   $('#btn-tocar').addEventListener('click', () => previa.alternar());
@@ -951,7 +1039,7 @@ function montarEventos() {
   });
   window.addEventListener('beforeunload', (e) => {
     legendas.concluirEdicao(); // fechar ou recarregar no meio da digitação não perde a correção
-    if (estado.salvar.timer || estado.importando.length || exportacaoAtual) {
+    if (estado.salvar.timer || estado.salvar.erro || estado.importando.length || exportando) {
       salvarAgora(true);
       e.preventDefault();
     }

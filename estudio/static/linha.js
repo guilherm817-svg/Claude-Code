@@ -163,7 +163,8 @@ export class LinhaDoTempo {
     this.rolagem.scrollLeft = 0;
   }
 
-  // Clicar ou arrastar na régua (ou no espaço vazio da trilha) move a agulha.
+  // Clicar ou arrastar na régua (ou no espaço vazio da trilha) move a agulha. O arrasto acaba ao soltar e também
+  // quando o navegador fica com o gesto (o dedo rolando a trilha numa tela touch): senão a agulha seguiria o mouse.
   _arrastarAgulha(alvo, soNoVazio = false) {
     alvo.addEventListener('pointerdown', (e) => {
       if (e.button !== 0 || (soNoVazio && e.target !== alvo)) return;
@@ -174,8 +175,9 @@ export class LinhaDoTempo {
         this.op.aoBuscar(limitar(x / this.zoom, 0, this.total));
       };
       mover(e);
-      alvo.addEventListener('pointermove', mover);
-      alvo.addEventListener('pointerup', () => alvo.removeEventListener('pointermove', mover), { once: true });
+      const fim = new AbortController();
+      alvo.addEventListener('pointermove', mover, { signal: fim.signal });
+      for (const tipo of ['pointerup', 'pointercancel', 'lostpointercapture']) alvo.addEventListener(tipo, () => fim.abort(), { signal: fim.signal });
     });
   }
 
@@ -352,6 +354,7 @@ export class LinhaDoTempo {
     ctx.clearRect(0, 0, largura, altura);
     const passo = PASSOS_REGUA.find((p) => p * this.zoom >= 64) || 600;
     const menor = passo / 5;
+    const casas = passo >= 1 ? 0 : (passo * 10) % 1 ? 2 : 1; // 0,25 s pede duas casas (com uma, viraria 0:00.3)
     const inicio = this.rolagem.scrollLeft / this.zoom;
     const fim = inicio + largura / this.zoom;
     ctx.strokeStyle = '#3a4152';
@@ -359,12 +362,14 @@ export class LinhaDoTempo {
     ctx.font = '11px system-ui, sans-serif';
     ctx.textBaseline = 'top';
     ctx.beginPath();
-    for (let t = Math.floor(inicio / menor) * menor; t <= fim; t += menor) {
+    // Marcas contadas, e não somadas: somar o passo acumula erro e uma marca principal pode virar secundária.
+    for (let i = Math.floor(inicio / menor); i * menor <= fim; i++) {
+      const t = i * menor;
       const x = Math.round(t * this.zoom - this.rolagem.scrollLeft) + 0.5;
-      const principal = Math.abs(t / passo - Math.round(t / passo)) < 1e-6;
+      const principal = i % 5 === 0;
       ctx.moveTo(x, principal ? 12 : 19);
       ctx.lineTo(x, altura);
-      if (principal) ctx.fillText(relogio(t, passo < 1 ? 1 : 0), x + 4, 3);
+      if (principal) ctx.fillText(relogio(t, casas), x + 4, 3);
     }
     ctx.stroke();
     // Fim do vídeo.
