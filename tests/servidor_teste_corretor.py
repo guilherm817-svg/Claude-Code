@@ -1,7 +1,8 @@
 """Servidor do Estúdio para o teste de tela do Corretor (tests/e2e_estudio_corretor.cjs).
 
 Roda o Estúdio de verdade; só a rede até o Claude é trocada por uma resposta fixa (tests/dados/correcao_exemplo.json),
-enviada em pedaços com pequenas pausas para a tela mostrar as etapas. Um prompt com "ERRO-401" simula chave inválida.
+enviada em pedaços com pequenas pausas para a tela mostrar as etapas. Um prompt com "ERRO-401" simula chave inválida,
+e um com "LENTO" deixa o "Claude" raciocinando (só pings) por 20 s, para testar o Cancelar.
 O .env e os projetos ficam na pasta indicada, e o último pedido enviado ao "Claude" é gravado em ultimo_pedido.json.
 
     python tests/servidor_teste_corretor.py --porta 8710 --pasta /tmp/corretor-e2e
@@ -28,7 +29,7 @@ def _evento(nome: str, dados: dict) -> bytes:
     return f"event: {nome}\ndata: {json.dumps(dados, ensure_ascii=False)}\n\n".encode()
 
 
-def _sse(texto: str):
+def _sse(texto: str, pensando: float = 0.8):
     yield _evento("message_start", {"type": "message_start", "message": {
         "id": "msg_teste", "type": "message", "role": "assistant", "model": "claude-opus-5-5", "content": [],
         "stop_reason": None, "stop_sequence": None,
@@ -36,7 +37,9 @@ def _sse(texto: str):
     # Raciocínio (vem vazio, como na API) antes do texto.
     yield _evento("content_block_start", {"type": "content_block_start", "index": 0,
                                           "content_block": {"type": "thinking", "thinking": "", "signature": ""}})
-    time.sleep(0.8)
+    for _ in range(int(pensando / 0.2)):
+        time.sleep(0.2)
+        yield _evento("ping", {"type": "ping"})
     yield _evento("content_block_delta", {"type": "content_block_delta", "index": 0,
                                           "delta": {"type": "signature_delta", "signature": "assinatura"}})
     yield _evento("content_block_stop", {"type": "content_block_stop", "index": 0})
@@ -76,7 +79,8 @@ def main() -> None:
         if "ERRO-401" in corpo["messages"][0]["content"]:
             return httpx2.Response(401, json={"type": "error", "error": {"type": "authentication_error",
                                                                           "message": "invalid x-api-key"}})
-        return httpx2.Response(200, headers={"content-type": "text/event-stream"}, content=_sse(resposta))
+        pensando = 20 if "LENTO" in corpo["messages"][0]["content"] else 0.8
+        return httpx2.Response(200, headers={"content-type": "text/event-stream"}, content=_sse(resposta, pensando))
 
     corretor._cliente = lambda: anthropic.Anthropic(
         max_retries=0, http_client=anthropic.DefaultHttpxClient(transport=httpx2.MockTransport(responder)))

@@ -1,6 +1,7 @@
 // Teste do Corretor de prompts num Chromium de verdade: troca de aba, atalhos da montagem desligados no Corretor,
 // chave da API, colar o prompt real do usuário, corrigir (com a API do Claude simulada por
-// tests/servidor_teste_corretor.py), ver problemas e blocos, copiar, corrigir de novo sem um item, histórico e erro.
+// tests/servidor_teste_corretor.py), ver problemas e blocos, copiar, corrigir de novo sem itens em várias rodadas,
+// cancelar no meio, histórico e erro.
 // Rode na raiz do projeto: NODE_PATH="$(npm root -g)" node tests/e2e_estudio_corretor.cjs
 // Com CAPTURAS=<pasta>, salva capturas de tela nessa pasta.
 const { chromium } = require('playwright');
@@ -73,6 +74,13 @@ async function esperarServidor() {
       return (await (await fetch(`/api/projetos/${primeiro.id}`)).json()).linha;
     });
     const textoDoLado = () => pagina.textContent('#corretor-lado');
+    const ultimaMensagem = () => JSON.parse(fs.readFileSync(path.join(TEMP, 'ultimo_pedido.json'), 'utf8')).messages[0].content;
+    const itensAMais = () => pagina.$$eval('.item-a-mais', (lista) => lista.map((i) => ({
+      texto: i.querySelector('strong').textContent,
+      marcado: i.querySelector('input').checked,
+      tirado: i.classList.contains('tirado'),
+      selo: i.querySelector('.selo-tirado')?.textContent || null,
+    })));
 
     console.log('Montagem com um clipe selecionado');
     await pagina.goto(BASE);
@@ -162,16 +170,57 @@ async function esperarServidor() {
     await pagina.click('button:has-text("Corrigir de novo sem os desmarcados")');
     await pagina.waitForSelector('.cartao-progresso');
     await pagina.waitForSelector('.resultado-topo', { timeout: 30000 });
-    const ultimo = JSON.parse(fs.readFileSync(path.join(TEMP, 'ultimo_pedido.json'), 'utf8'));
-    const mensagem = ultimo.messages[0].content;
-    conferir(mensagem.includes(`<itens_para_tirar>\n- ${EXEMPLO.acrescentados_pela_ia[0].item}\n</itens_para_tirar>`)
+    const mensagem = ultimaMensagem();
+    const [itemA, itemB] = EXEMPLO.acrescentados_pela_ia.map((a) => a.item);
+    conferir(mensagem.includes(`<itens_para_tirar>\n- ${itemA}\n</itens_para_tirar>`)
       && mensagem.includes('<pedido_original>'), 'o item desmarcado vai na lista de itens para tirar');
+
+    console.log('Segunda rodada: o que já saiu continua fora');
+    // A resposta fixa lista os dois itens de novo; o tirado aparece uma vez só, desmarcado.
+    const itensRodada2 = await itensAMais();
+    conferir(itensRodada2.length === 2 && itensRodada2[0].texto === itemA && itensRodada2[0].tirado && !itensRodada2[0].marcado
+      && itensRodada2[0].selo === 'Tirado' && itensRodada2[1].texto === itemB && itensRodada2[1].marcado,
+    'o item tirado na rodada anterior aparece desmarcado, sem repetir', itensRodada2);
+    conferir(await pagina.isDisabled('#corretor-acrescentados button'), 'sem mudança, o botão de corrigir de novo fica desligado');
+    await pagina.uncheck('.item-a-mais input >> nth=1');
+    await pagina.$eval('#corretor-acrescentados', (s) => s.scrollIntoView({ block: 'start' }));
+    await capturar('05b-itens-tirados');
+    await pagina.click('button:has-text("Corrigir de novo sem os desmarcados")');
+    await pagina.waitForSelector('.cartao-progresso');
+    await pagina.waitForSelector('.resultado-topo', { timeout: 30000 });
+    conferir(ultimaMensagem().includes(`<itens_para_tirar>\n- ${itemA}\n- ${itemB}\n</itens_para_tirar>`),
+      'a segunda rodada pede para tirar os dois itens');
+
+    console.log('Devolver um item tirado');
+    conferir((await itensAMais()).every((i) => i.tirado && !i.marcado), 'os dois aparecem como tirados');
+    await pagina.check('.item-a-mais input >> nth=0');
+    conferir((await itensAMais())[0].selo === 'Volta ao prompt', 'marcar de volta mostra que o item volta ao prompt');
+    await capturar('05c-devolver-item');
+    await pagina.click('button:has-text("Corrigir de novo sem os desmarcados")');
+    await pagina.waitForSelector('.cartao-progresso');
+    await pagina.waitForSelector('.resultado-topo', { timeout: 30000 });
+    conferir(ultimaMensagem().includes(`<itens_para_tirar>\n- ${itemB}\n</itens_para_tirar>`), 'só o item que continuou desmarcado sai');
+
+    console.log('Cancelar no meio');
+    const antesDoCancelar = await itensAMais();
+    await pagina.fill('#corretor-prompt', `LENTO ${PROMPT_REAL}`);
+    await pagina.click('#corretor-enviar');
+    await pagina.waitForSelector('#corretor-etapas li.atual:nth-child(2)');
+    await pagina.click('.cartao-progresso button:has-text("Cancelar")');
+    await pagina.waitForSelector('.resultado-topo');
+    conferir((await pagina.textContent('#avisos-flutuantes')).includes('Correção cancelada.'), 'avisa que a correção foi cancelada');
+    const depoisDoCancelar = await itensAMais();
+    conferir(JSON.stringify(depoisDoCancelar) === JSON.stringify(antesDoCancelar) && depoisDoCancelar.some((i) => i.tirado),
+      'volta ao resultado anterior, com os mesmos itens tirados', depoisDoCancelar);
+    conferir(!(await pagina.isDisabled('#corretor-enviar')), 'o botão de corrigir volta a funcionar');
+    await pagina.fill('#corretor-prompt', PROMPT_REAL);
+    await sleep(500); // o rascunho é guardado 300 ms depois de digitar
 
     console.log('Histórico e erro');
     await pagina.reload();
     await pagina.waitForSelector('#corretor-form');
     conferir(await pagina.isVisible('#corretor-form'), 'ao abrir de novo, volta na aba do Corretor');
-    conferir(await pagina.$$eval('.historico-item', (l) => l.length) === 2, 'histórico com as duas correções');
+    conferir(await pagina.$$eval('.historico-item', (l) => l.length) === 4, 'histórico com as quatro correções (a cancelada não entra)');
     conferir(await pagina.inputValue('#corretor-prompt') === PROMPT_REAL, 'o rascunho do prompt continua no campo');
     await pagina.click('.historico-item >> nth=1');
     await pagina.waitForSelector('.resultado-topo');

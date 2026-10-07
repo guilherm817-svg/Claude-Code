@@ -172,12 +172,17 @@ ChatGPT...) e o Claude devolve:
 - o **prompt corrigido**, pronto para copiar e já dividido em blocos quando a fala não cabe no clipe (o Estúdio
   confere cada bloco: no máximo 2.500 caracteres e fala que cabe no tempo do clipe no ritmo escolhido);
 - **alertas de alcance** no Reels (promessa de saúde, isca de engajamento...) e, se você contar o que pediu para a
-  IA, os **itens que ela colocou sem você pedir**, para você decidir se ficam.
+  IA, os **itens que ela colocou sem você pedir**, para você decidir se ficam (o que você tirar continua fora nas
+  correções seguintes, e dá para devolver).
 
 Ele conhece as travas que evitam os bugs mais comuns do Veo 3.1 (Google Flow), do Kling e do Seedance: corte da
 primeira palavra, fala corrida ou repetida, voz extra, legenda e letras tortas na tela, gêmeos no lugar de um
-casal, mãos deformando, sotaque de Portugal, configurações escritas no texto que só funcionam no Flow. Prompt que
-ensina algo perigoso para quem copiar não volta no resultado. As regras ficam em `estudio/regras_prompts.md`.
+casal, mãos deformando, sotaque de Portugal, configurações escritas no texto que só funcionam no Flow, gesto no
+fígado ou na barriga, carro parado, blocos de gancho, de pergunta lida e de reação. Prompt que ensina algo
+perigoso para quem copiar não volta no resultado. As regras ficam em `estudio/regras_prompts.md`.
+
+A correção leva de meio minuto a dois minutos. **Cancelar** (ou fechar a aba) encerra na hora a conversa com o
+Claude: daí em diante nada mais é gerado nem cobrado.
 
 O Corretor usa a mesma chave da API do Claude que o Analisador (`ANTHROPIC_API_KEY` no `.env`). Se ela ainda não
 estiver configurada, a própria aba explica como criar a chave em [console.anthropic.com](https://console.anthropic.com)

@@ -199,6 +199,9 @@ body.aba-corretor .avisos-flutuantes { bottom: 16px; }
 .item-a-mais input { margin-top: 3px; accent-color: var(--destaque); }
 .item-a-mais strong { display: block; color: var(--texto); }
 .item-a-mais small { display: block; margin-top: 2px; color: var(--texto-2); font-size: 12px; }
+.item-a-mais > span:not(.selo-tirado) { flex: 1; min-width: 0; }
+.selo-tirado { flex: none; align-self: center; padding: 2px 8px; border-radius: 999px; background: var(--painel-2); border: 1px solid var(--borda-forte); color: var(--texto-2); font-size: 11px; font-weight: 600; }
+.item-a-mais.tirado:has(input:checked) .selo-tirado { border-color: rgba(52, 211, 153, .4); color: var(--ok); }
 
 .alertas { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .alertas li { display: flex; gap: 10px; padding: 10px 12px; border-radius: 10px; background: rgba(251, 191, 36, .08); border: 1px solid rgba(251, 191, 36, .25); color: #fde68a; }

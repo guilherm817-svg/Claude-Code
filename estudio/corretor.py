@@ -9,6 +9,8 @@ Estúdio confere cada bloco (tamanho e tempo da fala) em vez de confiar só na c
 from __future__ import annotations
 
 import re
+import socket
+import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime
@@ -16,6 +18,7 @@ from pathlib import Path
 from typing import Literal
 
 import anthropic
+import httpx2
 import pydantic
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -36,7 +39,7 @@ SOBRA_QUE_REPETE = 3.5  # s sem fala a partir dos quais o gerador costuma repeti
 GERADORES = {
     "veo": ("Google Flow (Veo 3.1)", 8, 8, [4, 6, 8]),
     "kling": ("Kling", 10, 10, [5, 10]),
-    "seedance": ("Seedance", 10, 15, list(range(4, 16))),
+    "seedance": ("Seedance", 8, 15, list(range(4, 16))),  # chega a 15 s, mas boca e mãos artefatam mais acima de 8
     "imagem": ("Imagem (foto de referência)", None, None, []),
 }
 CADENCIAS = {"natural": ("natural", 2.5), "1.1x": ("1.1x", 2.75), "1.25x": ("1.25x", 3.1)}
@@ -70,6 +73,49 @@ class ErroCorretor(Exception):
     def __init__(self, mensagem: str, codigo: str = "erro"):
         super().__init__(mensagem)
         self.codigo = codigo
+
+
+class Cancelamento:
+    """Deixa outra thread interromper uma correção em andamento (o usuário clicou em Cancelar ou fechou a aba).
+
+    Derruba a conexão com a API na hora: assim o Claude para de gerar a resposta, e de cobrar por ela.
+    """
+
+    def __init__(self) -> None:
+        self._solicitado = threading.Event()
+        self._trava = threading.Lock()
+        self._resposta: httpx2.Response | None = None
+
+    @property
+    def solicitado(self) -> bool:
+        return self._solicitado.is_set()
+
+    def vigiar(self, resposta: httpx2.Response) -> None:
+        with self._trava:
+            self._resposta = resposta
+            if not self.solicitado:
+                return
+        _derrubar(resposta)
+
+    def cancelar(self) -> None:
+        with self._trava:
+            self._solicitado.set()
+            resposta = self._resposta
+        if resposta is not None:
+            _derrubar(resposta)
+
+
+def _derrubar(resposta: httpx2.Response) -> None:
+    # Fechar a resposta de outra thread não acorda quem espera o próximo pedaço do stream, e enquanto raciocina o
+    # Claude passa dezenas de segundos sem mandar nada. Desligar o socket acorda essa espera e encerra a conexão.
+    rede = resposta.extensions.get("network_stream")
+    conexao = rede.get_extra_info("socket") if rede is not None else None
+    if conexao is None:
+        return
+    try:
+        conexao.shutdown(socket.SHUT_RDWR)
+    except OSError:
+        pass  # a conexão já tinha caído
 
 
 # Entrada
@@ -308,6 +354,10 @@ def _erros_amigaveis():
         raise ErroCorretor(f"Erro no servidor da API ({e.status_code}). Tente de novo em instantes.") from e
     except anthropic.APIConnectionError as e:
         raise ErroCorretor("Sem conexão com a API do Claude. Verifique sua internet e tente de novo.", "conexao") from e
+    except httpx2.TransportError as e:
+        # Uma queda depois de a resposta começar chega direto do httpx2, sem passar pelos erros do SDK.
+        raise ErroCorretor("A conexão com a API do Claude caiu no meio da resposta. Verifique sua internet e tente "
+                           "de novo.", "conexao") from e
 
 
 def _cliente() -> anthropic.Anthropic:
@@ -319,15 +369,34 @@ def _etapa(numero: int) -> dict:
     return {"etapa": numero, "de": len(ETAPAS), "texto": ETAPAS[numero - 1]}
 
 
-def acompanhar(pedido: PedidoCorrecao) -> Iterator[dict]:
+def _cancelada() -> ErroCorretor:
+    return ErroCorretor("Correção cancelada.", "cancelada")
+
+
+@contextmanager
+def _parar_se_cancelado(cancelamento: Cancelamento):
+    # Derrubar a conexão faz o stream falhar no meio; para quem cancelou, isso é o cancelamento, não um erro.
+    try:
+        yield
+    except ErroCorretor:
+        raise
+    except Exception as e:
+        if cancelamento.solicitado:
+            raise _cancelada() from e
+        raise
+
+
+def acompanhar(pedido: PedidoCorrecao, cancelamento: Cancelamento | None = None) -> Iterator[dict]:
     """Corrige o prompt avisando cada etapa ({"etapa", "de", "texto"}); no fim, {"resultado": Correcao}.
 
     As etapas saem do próprio streaming: o raciocínio começa, o JSON chega aos problemas e depois aos blocos.
+    Com `cancelamento`, outra thread pode interromper a correção; aí sai ErroCorretor com o código "cancelada".
     """
+    cancelamento = cancelamento or Cancelamento()
     atual = 1
     yield _etapa(atual)
     texto = ""
-    with _erros_amigaveis():
+    with _erros_amigaveis(), _parar_se_cancelado(cancelamento):
         with _cliente().beta.messages.stream(
             model=config.MODELO_CLAUDE,
             max_tokens=64000,
@@ -340,7 +409,10 @@ def acompanhar(pedido: PedidoCorrecao) -> Iterator[dict]:
             betas=[BETA_FALLBACK],
             fallbacks="default",
         ) as stream:
+            cancelamento.vigiar(stream.response)
             for evento in stream:
+                if cancelamento.solicitado:
+                    raise _cancelada()
                 proxima = atual
                 if evento.type == "message_start":
                     proxima = 2
@@ -361,11 +433,13 @@ def acompanhar(pedido: PedidoCorrecao) -> Iterator[dict]:
         raise ErroCorretor("O Claude não quis corrigir este prompt. Reescreva o pedido com outras palavras.")
     if resposta.stop_reason == "max_tokens":
         raise ErroCorretor("A resposta ficou longa demais e foi cortada. Corrija o prompt em partes menores.")
+    # Se o modelo recusar no meio e o de reserva assumir, o texto parcial fica num bloco, vem o bloco "fallback" e
+    # a continuação chega em outro bloco de texto: o JSON é a junção de todos eles.
     textos = [b.text for b in resposta.content if b.type == "text"]
     if not textos:
         raise ErroCorretor("A resposta do Claude veio vazia. Tente de novo.")
     try:
-        saida = RespostaCorretor.model_validate_json(textos[-1])
+        saida = RespostaCorretor.model_validate_json("".join(textos))
     except pydantic.ValidationError as e:
         raise ErroCorretor("A resposta do Claude veio num formato inesperado. Tente de novo.") from e
 

@@ -7,6 +7,7 @@ o resultado ou com o erro. A chave da API nunca volta em nenhuma resposta.
 import json
 import logging
 
+import anyio
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
@@ -24,6 +25,45 @@ async def _corpo(request: Request):
 
 def _linha(dados: dict) -> str:
     return json.dumps(dados, ensure_ascii=False) + "\n"
+
+
+async def _transmitir(pedido: corretor.PedidoCorrecao):
+    """Passa as etapas da correção para a tela, linha a linha.
+
+    Se o navegador desistir no meio (Cancelar, aba fechada), o servidor cancela esta resposta. A espera pela thread
+    é abandonada na hora, sem aguardar o próximo evento do Claude, e a conexão com a API é derrubada.
+    """
+    cancelamento = corretor.Cancelamento()
+    eventos = corretor.acompanhar(pedido, cancelamento)
+    acabou = na_thread = False
+    try:
+        while True:
+            na_thread = True
+            try:
+                evento = await anyio.to_thread.run_sync(next, eventos, None, abandon_on_cancel=True)
+            except corretor.ErroCorretor as erro:
+                acabou = True
+                yield _linha({"erro": str(erro), "codigo": erro.codigo})
+                return
+            except Exception:
+                acabou = True
+                log.exception("Falha inesperada no Corretor de prompts")
+                yield _linha({"erro": "Algo deu errado ao corrigir o prompt. Tente de novo.", "codigo": "erro"})
+                return
+            na_thread = False
+            if evento is None:
+                acabou = True
+                return
+            if "resultado" in evento:
+                evento = {"resultado": evento["resultado"].model_dump(mode="json")}
+            yield _linha(evento)
+    finally:
+        if not acabou:
+            cancelamento.cancelar()
+            # Parada entre dois eventos: fecha aqui mesmo. Se a thread ainda roda, ela termina sozinha ao ver o
+            # cancelamento (fechar um gerador em uso por outra thread daria erro).
+            if not na_thread:
+                eventos.close()
 
 
 def rotas_corretor() -> APIRouter:
@@ -52,19 +92,7 @@ def rotas_corretor() -> APIRouter:
             return JSONResponse({"detail": "Falta conectar o Corretor ao Claude: cole a sua chave da API.",
                                  "codigo": "chave"}, status_code=400)
 
-        def eventos():
-            try:
-                for evento in corretor.acompanhar(pedido):
-                    if "resultado" in evento:
-                        evento = {"resultado": evento["resultado"].model_dump(mode="json")}
-                    yield _linha(evento)
-            except corretor.ErroCorretor as erro:
-                yield _linha({"erro": str(erro), "codigo": erro.codigo})
-            except Exception:
-                log.exception("Falha inesperada no Corretor de prompts")
-                yield _linha({"erro": "Algo deu errado ao corrigir o prompt. Tente de novo.", "codigo": "erro"})
-
-        return StreamingResponse(eventos(), media_type="application/x-ndjson",
+        return StreamingResponse(_transmitir(pedido), media_type="application/x-ndjson",
                                  headers={"Cache-Control": "no-store"})
 
     return rotas

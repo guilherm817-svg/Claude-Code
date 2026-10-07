@@ -251,7 +251,7 @@ async function corrigir(extra = {}) {
     return;
   }
   const controle = new AbortController();
-  const anterior = { fase: estado.fase, resultado: estado.resultado };
+  const anterior = { fase: estado.fase, resultado: estado.resultado, pedido: estado.pedido, erro: estado.erro };
   Object.assign(estado, { controle, fase: 'corrigindo', etapa: 0, inicio: Date.now(), erro: null, pedido, trocandoChave: false });
   desenharLado();
   estado.relogio = setInterval(desenharTempo, 1000);
@@ -359,7 +359,7 @@ function desenharLado() {
   if (!estado.temChave || estado.trocandoChave) partes.push(cartaoDaChave());
   if (estado.fase === 'corrigindo') partes.push(cartaoDeProgresso());
   else if (estado.fase === 'erro') partes.push(cartaoDeErro());
-  else if (estado.fase === 'pronto') partes.push(...desenharResultado(estado.resultado));
+  else if (estado.fase === 'pronto') partes.push(...desenharResultado(estado.resultado, estado.pedido));
   else if (estado.temChave && !estado.trocandoChave) partes.push(estadoVazio());
   lado.replaceChildren(...partes);
   if (estado.fase === 'corrigindo') desenharProgresso();
@@ -456,8 +456,10 @@ function secao(id, titulo, nomeIcone, dica, ...conteudo) {
     ...conteudo);
 }
 
-function desenharResultado(r) {
+// `pedido` é o pedido que gerou este resultado: dele saem os itens já tirados em rodadas anteriores.
+function desenharResultado(r, pedido) {
   const g = gerador(r.gerador);
+  const itens = itensAMais(r, pedido);
   const contagem = { alta: 0, media: 0, baixa: 0 };
   r.problemas.forEach((p) => { contagem[p.gravidade] += 1; });
   const quando = new Date(r.gerada_em);
@@ -475,7 +477,7 @@ function desenharResultado(r) {
     el('nav', { class: 'resultado-nav', 'aria-label': 'Partes do resultado' },
       r.blocos.length ? atalho('corretor-blocos', r.blocos.length === 1 ? 'Prompt pronto' : 'Blocos prontos', r.blocos.length) : null,
       r.problemas.length ? atalho('corretor-problemas', 'Problemas', r.problemas.length, contagem.alta ? 'tem-alta' : '') : null,
-      r.acrescentados_pela_ia.length ? atalho('corretor-acrescentados', 'Itens a mais', r.acrescentados_pela_ia.length) : null,
+      itens.length ? atalho('corretor-acrescentados', 'Itens a mais', itens.length) : null,
       r.alertas_de_alcance.length ? atalho('corretor-alcance', 'Alcance', r.alertas_de_alcance.length) : null,
       r.estilo_de_legenda ? atalho('corretor-legenda', 'Legenda') : null))];
 
@@ -499,7 +501,7 @@ function desenharResultado(r) {
         el('span', { class: `contagem ${n}` }, el('span', { class: 'ponto' }), `${contagem[n]} ${n === 'alta' ? 'grave' : n === 'media' ? 'médio' : 'leve'}${contagem[n] > 1 ? 's' : ''}`))),
       el('div', { class: 'problemas' }, ...r.problemas.map(cartaoDoProblema))));
   }
-  if (r.acrescentados_pela_ia.length) partes.push(secaoAcrescentados(r));
+  if (itens.length) partes.push(secaoAcrescentados(itens));
   if (r.alertas_de_alcance.length) {
     partes.push(secao('corretor-alcance', 'Alertas de alcance no Reels', 'alcance',
       'Nada foi tirado por causa disso: a decisão é sua. São coisas que costumam fazer o Instagram mostrar menos o vídeo para quem não segue você.',
@@ -544,21 +546,43 @@ function cartaoDoProblema(p) {
       el('dt', {}, 'O que mudou'), el('dd', {}, p.o_que_mudou)));
 }
 
-function secaoAcrescentados(r) {
-  const refazer = el('button', { class: 'botao', type: 'button', disabled: true }, icone('varinha', 15), 'Corrigir de novo sem os desmarcados');
-  const caixas = r.acrescentados_pela_ia.map((a) => ({ item: a.item, caixa: el('input', { type: 'checkbox', checked: true }) }));
-  const conferir = () => { refazer.disabled = !caixas.some((c) => !c.caixa.checked) || Boolean(estado.controle); };
+// Os itens tirados nas rodadas anteriores continuam na lista, desmarcados: a próxima correção pede para tirar
+// todos de novo (senão eles voltariam ao prompt sem aviso), e marcar um deles o devolve ao prompt.
+function itensAMais(r, pedido) {
+  const tirados = Array.isArray(pedido?.remover_itens) ? pedido.remover_itens : [];
+  return [
+    ...tirados.map((item) => ({ item, risco: 'Tirado numa correção anterior. Marque para devolver ao prompt.', tirado: true })),
+    ...r.acrescentados_pela_ia.filter((a) => !tirados.includes(a.item)).map((a) => ({ ...a, tirado: false })),
+  ];
+}
+
+function secaoAcrescentados(itens) {
+  const refazer = el('button', { class: 'botao', type: 'button', disabled: true });
+  const caixas = itens.map((a) => ({ ...a, caixa: el('input', { type: 'checkbox', checked: !a.tirado }),
+    selo: a.tirado ? el('span', { class: 'selo-tirado' }) : null }));
+  const desmarcados = () => caixas.filter((c) => !c.caixa.checked).map((c) => c.item);
+  const conferir = () => {
+    const remover = desmarcados();
+    const mudou = caixas.some((c) => c.caixa.checked === c.tirado);
+    refazer.disabled = !mudou || Boolean(estado.controle);
+    const devolveTudo = !remover.length && caixas.some((c) => c.tirado);
+    refazer.replaceChildren(icone('varinha', 15), devolveTudo ? 'Corrigir de novo com tudo de volta' : 'Corrigir de novo sem os desmarcados');
+    caixas.forEach((c) => c.selo?.replaceChildren(c.caixa.checked ? 'Volta ao prompt' : 'Tirado'));
+  };
   caixas.forEach((c) => c.caixa.addEventListener('change', conferir));
   refazer.addEventListener('click', () => {
-    const remover = caixas.filter((c) => !c.caixa.checked).map((c) => c.item);
+    const remover = desmarcados();
     if (estado.pedido) preencherFormulario(estado.pedido);
     corrigir({ remover_itens: remover });
   });
+  conferir();
+  const algumTirado = itens.some((a) => a.tirado);
   return secao('corretor-acrescentados', 'O que a IA colocou sem você pedir', 'ia',
-    'Marcado continua no prompt. Desmarque o que você não quer e corrija de novo.',
-    el('div', { class: 'acrescentados' }, ...r.acrescentados_pela_ia.map((a, i) => el('label', { class: 'item-a-mais' },
-      caixas[i].caixa,
-      el('span', {}, el('strong', {}, a.item), el('small', {}, a.risco))))),
+    `Marcado continua no prompt. Desmarque o que você não quer e corrija de novo.${algumTirado ? ' O que você já tirou aparece desmarcado: marque para devolver.' : ''}`,
+    el('div', { class: 'acrescentados' }, ...caixas.map((c) => el('label', { class: `item-a-mais${c.tirado ? ' tirado' : ''}` },
+      c.caixa,
+      el('span', {}, el('strong', {}, c.item), el('small', {}, c.risco)),
+      c.selo))),
     refazer);
 }
 
