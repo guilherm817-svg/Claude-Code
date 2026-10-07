@@ -137,8 +137,10 @@ Ele roda no seu computador, como o Analisador: os vídeos não saem da sua máqu
 
 **Para abrir no Mac:**
 
-1. Só na primeira vez: instale o **Python 3.12** pelo [python.org](https://www.python.org/downloads/macos/)
-   (o instalador "macOS 64-bit universal2"). O Python que já vem no Mac é antigo demais para o app.
+1. Só na primeira vez: instale o **Python 3.13** pelo [python.org](https://www.python.org/downloads/macos/). Na
+   página, procure na lista o "Python 3.13" mais recente e baixe o "macOS 64-bit universal2 installer". Não use o
+   botão grande da versão mais nova: ela acabou de sair e as bibliotecas da transcrição ainda não têm versão para
+   ela. O Python que já vem no Mac também não serve, porque é antigo demais.
 2. Baixe o projeto (botão **Code › Download ZIP** no GitHub) e descompacte.
 3. Dê dois cliques em **`Abrir Estúdio.command`**. Na primeira vez ele instala o que precisa, inclusive o
    ffmpeg (alguns minutos), e depois abre o Estúdio no navegador (`http://127.0.0.1:8502`). Deixe a janela do
