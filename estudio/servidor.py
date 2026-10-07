@@ -15,6 +15,7 @@ from . import config
 from .exportar import ErroExportacao, Exportador
 from .projetos import Ajustes, ErroImportacao, Estudio, ProjetoNaoEncontrado
 from .rotas_legendas import criar_rotas_legendas
+from .rotas_corretor import rotas_corretor
 
 ESTATICOS = Path(__file__).parent / "static"
 # Pedidos que mudam algo precisam deste cabeçalho. Um site qualquer aberto no navegador não consegue mandá-lo
@@ -171,6 +172,7 @@ def criar_app(estudio: Estudio | None = None) -> FastAPI:
         _abrir_pasta(pasta)
 
     app.include_router(criar_rotas_legendas(estudio))
+    app.include_router(rotas_corretor())
 
     # A tela
 

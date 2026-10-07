@@ -1,0 +1,162 @@
+{
+  "recusado": false,
+  "motivo_recusa": "",
+  "resumo": "Encontrei 14 problemas. Os mais graves: a fala não cabe em 8 s (ia sair corrida ou cortada), \"identical couple\" pode virar gêmeos, o visor da balança vira números tortos e a fala sem pontuação e sem acento muda a pronúncia. Dividi em 2 blocos de 8 s, pontuei e acentuei a fala e tirei o que só funciona nas configurações do Flow.",
+  "problemas": [
+    {
+      "gravidade": "alta",
+      "categoria": "tempo_da_fala",
+      "trecho_original": "Aprendi parei com bicarbonato pra emagrecer tem muito sodio agora e comida simples e 30 min de caminhada comenta YES",
+      "problema": "As duas falas juntas têm 25 palavras: no ritmo natural levam cerca de 11 s, e o clipe do Veo tem 8 s.",
+      "por_que_da_bug": "Quando a fala não cabe, o Veo acelera tudo (fala corrida), corta no meio ou o fim simplesmente some.",
+      "o_que_mudou": "Dividi em 2 blocos sem quebrar frase: no Bloco 1 ele tira a balança e os dois falam; no Bloco 2 ela termina. Gere cada bloco como um clipe de 8 s e junte na Montagem."
+    },
+    {
+      "gravidade": "alta",
+      "categoria": "identidade",
+      "trecho_original": "Identical couple",
+      "problema": "\"Identical couple\" pode ser entendido como um casal idêntico, ou seja, gêmeos.",
+      "por_que_da_bug": "O Veo tende a gerar duas pessoas com o mesmo rosto, e o vídeo fica estranho.",
+      "o_que_mudou": "Troquei por \"a couple, one man and one woman, the same two people from the reference image\" e pedi que cada um mantenha o próprio rosto, cabelo e roupa."
+    },
+    {
+      "gravidade": "alta",
+      "categoria": "texto_na_tela",
+      "trecho_original": "bathroom scale in corner",
+      "problema": "Balança de banheiro costuma ter visor digital com números.",
+      "por_que_da_bug": "Qualquer número ou letra no cenário sai torto ou sem sentido no vídeo, e chama atenção.",
+      "o_que_mudou": "Descrevi uma balança branca simples com o visor desligado e em branco, e proibi texto no quarto."
+    },
+    {
+      "gravidade": "alta",
+      "categoria": "escrita_da_fala",
+      "trecho_original": "Aprendi parei com bicarbonato pra emagrecer tem muito sodio",
+      "problema": "A fala da mulher não tem nenhuma pontuação.",
+      "por_que_da_bug": "Sem ponto e vírgula o gerador lê tudo num fôlego só, sem pausas, e a fala sai corrida e robótica.",
+      "o_que_mudou": "Pontuei: \"Aprendi. Parei com bicarbonato pra emagrecer, tem muito sódio. Agora é comida simples e trinta minutos de caminhada. Comenta yes!\""
+    },
+    {
+      "gravidade": "alta",
+      "categoria": "escrita_da_fala",
+      "trecho_original": "agora e comida",
+      "problema": "Faltam acentos: \"Nao\", \"sodio\" e \"e\" no lugar de \"é\".",
+      "por_que_da_bug": "Sem acento a pronúncia muda: \"agora e comida\" é lido \"agora i comida\", o que muda o sentido.",
+      "o_que_mudou": "Escrevi \"Não\", \"sódio\" e \"agora é comida\"."
+    },
+    {
+      "gravidade": "media",
+      "categoria": "escrita_da_fala",
+      "trecho_original": "30 min",
+      "problema": "Número e abreviação escritos com algarismo.",
+      "por_que_da_bug": "O gerador pode ler \"trinta mín\", \"três zero\" ou pular a palavra.",
+      "o_que_mudou": "Escrevi por extenso: \"trinta minutos\"."
+    },
+    {
+      "gravidade": "media",
+      "categoria": "escrita_da_fala",
+      "trecho_original": "comenta YES",
+      "problema": "\"YES\" está todo em maiúsculas.",
+      "por_que_da_bug": "Palavra inteira em maiúsculas pode ser soletrada (Y-E-S) ou dita gritando. E \"yes\" no meio de uma fala em português pode sair com sotaque estranho.",
+      "o_que_mudou": "Escrevi \"yes\" em minúsculas. Se quiser evitar o inglês, troque por \"Comenta sim!\"."
+    },
+    {
+      "gravidade": "media",
+      "categoria": "escrita_da_fala",
+      "trecho_original": "in PT-BR",
+      "problema": "\"PT-BR\" sozinho não garante o sotaque brasileiro.",
+      "por_que_da_bug": "O Veo às vezes puxa o sotaque de Portugal.",
+      "o_que_mudou": "Pedi \"Brazilian Portuguese with a natural accent from Brazil, not European Portuguese\"."
+    },
+    {
+      "gravidade": "media",
+      "categoria": "configuracao",
+      "trecho_original": "Vertical 9:16 4K 8s",
+      "problema": "Proporção, resolução e duração escritas no texto.",
+      "por_que_da_bug": "Essas coisas não se controlam pelo prompt: o Veo ignora e o texto só tira atenção do que importa.",
+      "o_que_mudou": "Tirei do texto. No Flow, escolha 9:16 nas configurações e a resolução na hora de baixar o vídeo."
+    },
+    {
+      "gravidade": "media",
+      "categoria": "configuracao",
+      "trecho_original": "from Ingredient 1",
+      "problema": "Cita \"Ingredient 1\" como se o texto escolhesse a foto.",
+      "por_que_da_bug": "No Flow, Ingredientes usa a foto como referência da aparência e Frames usa a foto como primeiro quadro. Escrever o nome no texto não liga nenhum dos dois e pode confundir o modelo.",
+      "o_que_mudou": "No prompt ficou \"the same two people from the reference image\". No Flow, coloque a foto do casal em Ingredientes."
+    },
+    {
+      "gravidade": "media",
+      "categoria": "vozes",
+      "trecho_original": "Man says in PT-BR: \"Nao se pesa hoje\" Woman says in PT-BR:",
+      "problema": "Não diz com quem cada um fala, em que ordem, nem o que o outro faz enquanto isso.",
+      "por_que_da_bug": "O Veo pode trocar as vozes, fazer os dois mexerem a boca juntos ou inventar uma terceira voz.",
+      "o_que_mudou": "Ele fala com ela primeiro e ela responde; quem escuta fica de boca fechada; só essas duas vozes."
+    },
+    {
+      "gravidade": "media",
+      "categoria": "maos_e_objetos",
+      "trecho_original": "Man gently takes scale away",
+      "problema": "A ação com a balança não tem começo e fim definidos.",
+      "por_que_da_bug": "Mão segurando objeto por muito tempo deforma: os dedos grudam e a balança muda de forma. Se ele falar segurando a balança, piora.",
+      "o_que_mudou": "Ele pega a balança num movimento só, deixa atrás da cama e fala com as mãos livres; pedi cinco dedos em cada mão."
+    },
+    {
+      "gravidade": "media",
+      "categoria": "texto_na_tela",
+      "trecho_original": "No captions.",
+      "problema": "\"No captions\" sozinho é fraco.",
+      "por_que_da_bug": "O Veo costuma colocar legenda mesmo assim, e legenda gerada sai com palavras erradas e fora de sincronia.",
+      "o_que_mudou": "Usei a trava completa e \"(no subtitles, no captions, no on-screen text)\" depois de cada fala. Faça as legendas aqui no Estúdio."
+    },
+    {
+      "gravidade": "baixa",
+      "categoria": "identidade",
+      "trecho_original": "",
+      "problema": "Falta pedir boca fechada e silêncio no começo e no fim.",
+      "por_que_da_bug": "Começar com a boca aberta atrapalha a sincronia labial (a boca acompanhar a voz) e a primeira palavra pode sair cortada.",
+      "o_que_mudou": "Meio segundo de silêncio com a boca fechada no início de cada bloco e silêncio até o fim do clipe."
+    }
+  ],
+  "blocos": [
+    {
+      "titulo": "Bloco 1 — Ele tira a balança e ela responde",
+      "falas": [
+        {
+          "quem": "Homem",
+          "texto": "Não se pesa hoje."
+        },
+        {
+          "quem": "Mulher",
+          "texto": "Aprendi. Parei com bicarbonato pra emagrecer, tem muito sódio."
+        }
+      ],
+      "duracao_estimada_s": 7.6,
+      "prompt": "Cinematography: Medium two-shot at eye level, handheld iPhone look with a constant subtle natural micro-shake, never tripod-stable but not shaky. Vertical phone-style framing. One camera position for the whole clip: no zoom, no pan, no cuts, no slow motion.\nSubject: A couple, one man and one woman, the same two people from the reference image. Keep each person's exact face, hair, skin and clothes from the reference image; they are two different people, not twins. Both start with their mouths closed and relaxed, eyes natural.\nAction: For the first half second both stay still and silent. Then the man picks up the bathroom scale from the floor with both hands in one smooth motion and sets it down behind the bed, out of view; by second two his hands are empty, five fingers on each hand, and the scale keeps the same size and shape the whole time. He looks at the woman and says to her, calmly: \"Não se pesa hoje.\" (no subtitles, no captions, no on-screen text) While he speaks, she listens with her mouth closed. Then she looks at him and answers, calm and unrushed: \"Aprendi. Parei com bicarbonato pra emagrecer, tem muito sódio.\" (no subtitles, no captions, no on-screen text) While she speaks, he listens with his mouth closed. Each line is spoken once only. After her last word both stay silent, mouths settling closed, until the end of the clip.\nContext: A cozy bedroom at night, lit only by a warm bedside lamp. A plain white bathroom scale on the floor in the corner; its display is off and blank. No labels, no logos, no readable text anywhere in the room.\nStyle & Ambiance: Realistic smartphone video, natural skin texture, soft warm lamplight. Subtle, controlled mouth movement, minimal jaw, natural irregular blinking. Calm, even, unrushed pace. Only two voices, the man and then the woman, both speaking Brazilian Portuguese with a natural accent from Brazil, not European Portuguese. No other voice. No narrator, no music, no filler sounds (no hmm, no uh, no um). Quiet bedroom room tone. Absolutely no text on screen: no subtitles, no captions, no titles, no overlays, no watermark. A completely clean frame with zero text."
+    },
+    {
+      "titulo": "Bloco 2 — Ela termina e chama para comentar",
+      "falas": [
+        {
+          "quem": "Mulher",
+          "texto": "Agora é comida simples e trinta minutos de caminhada. Comenta yes!"
+        }
+      ],
+      "duracao_estimada_s": 6.2,
+      "prompt": "Cinematography: Medium two-shot at eye level, handheld iPhone look with a constant subtle natural micro-shake, never tripod-stable but not shaky. Vertical phone-style framing. One camera position for the whole clip: no zoom, no pan, no cuts, no slow motion.\nSubject: A couple, one man and one woman, the same two people from the reference image. Keep each person's exact face, hair, skin and clothes from the reference image; they are two different people, not twins. Both start with their mouths closed and relaxed, eyes natural.\nAction: For the first half second both stay still and silent, mouths closed. Then the woman looks into the camera and says, warm and unrushed: \"Agora é comida simples e trinta minutos de caminhada. Comenta yes!\" (no subtitles, no captions, no on-screen text) The man stays beside her, listening with his mouth closed, and gives a small nod. The line is spoken once only. After her last word she smiles softly and both stay still and silent, mouths closed, until the end of the clip.\nContext: The same cozy bedroom at night, lit only by a warm bedside lamp. No bathroom scale in view. No labels, no logos, no readable text anywhere in the room.\nStyle & Ambiance: Realistic smartphone video, natural skin texture, soft warm lamplight. Subtle, controlled mouth movement, minimal jaw, natural irregular blinking. Calm, even, unrushed pace. Only one voice in this clip: the woman, speaking Brazilian Portuguese with a natural accent from Brazil, not European Portuguese. The man does not speak. No narrator, no music, no filler sounds (no hmm, no uh, no um). Quiet bedroom room tone. Absolutely no text on screen: no subtitles, no captions, no titles, no overlays, no watermark. A completely clean frame with zero text."
+    }
+  ],
+  "acrescentados_pela_ia": [
+    {
+      "item": "Chamada \"comenta YES\" no fim da fala",
+      "risco": "Você não pediu. Pode reduzir o alcance por ser isca de engajamento e deixa a fala mais longa."
+    },
+    {
+      "item": "\"30 min de caminhada\"",
+      "risco": "Dica de exercício que você não pediu. É comum e de baixo risco, mas aumenta a fala."
+    }
+  ],
+  "alertas_de_alcance": [
+    "Fala sobre emagrecer: posts com promessa de emagrecimento ou alegação de saúde costumam não ser recomendados para quem não segue a conta. Aqui a mensagem é parar com o bicarbonato, o que ajuda, mas evite completar com frases como \"o truque que resolveu\".",
+    "\"Comenta yes\" é um pedido direto de comentário: o Instagram pode tratar como isca de engajamento e mostrar menos o vídeo. Uma pergunta aberta costuma funcionar melhor, como \"E você, já caiu nessa?\"."
+  ],
+  "estilo_de_legenda": ""
+}

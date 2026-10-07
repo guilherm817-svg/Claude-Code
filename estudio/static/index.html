@@ -6,11 +6,16 @@
   <title>Estúdio de Reels</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect x='3' y='1' width='18' height='22' rx='4' fill='%238b5cf6'/%3E%3Cpolygon points='10 8 16 12 10 16' fill='white'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="/static/estilo.css">
+  <link rel="stylesheet" href="/static/corretor.css">
   <script type="module" src="/static/app.js"></script>
 </head>
 <body>
   <header class="topo">
     <div class="marca" data-icone="filme" data-tamanho="20">Estúdio de Reels</div>
+    <nav class="abas" role="tablist" aria-label="Áreas do Estúdio">
+      <button class="aba" role="tab" aria-selected="true" data-aba="montagem" data-icone="montagem" data-tamanho="15">Montagem</button>
+      <button class="aba" role="tab" aria-selected="false" aria-controls="corretor" data-aba="corretor" data-icone="varinha" data-tamanho="15">Corretor de prompts</button>
+    </nav>
     <div class="projeto">
       <input id="nome-projeto" class="nome-projeto" maxlength="120" aria-label="Nome do projeto" spellcheck="false">
       <button id="btn-projetos" class="botao fantasma" aria-haspopup="menu">Projetos <span data-icone="seta" data-tamanho="14"></span></button>
@@ -71,6 +76,8 @@
   </main>
 
   <section id="linha" class="linha" aria-label="Linha do tempo"></section>
+
+  <section id="corretor" class="corretor" role="tabpanel" aria-label="Corretor de prompts" hidden></section>
 
   <div id="soltar" class="soltar" hidden><div><span data-icone="importar" data-tamanho="36"></span>Solte os vídeos para importar</div></div>
 

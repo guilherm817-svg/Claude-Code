@@ -173,6 +173,33 @@ letras tortas.
 | Ctrl+Z / Ctrl+Shift+Z | desfazer / refazer |
 | Z | mostra o vídeo inteiro na linha do tempo |
 
+### Corretor de prompts
+
+Na aba **Corretor de prompts**, no topo do Estúdio, você cola um prompt de vídeo que gerou em outra IA (Meta AI,
+ChatGPT...) e o Claude devolve:
+
+- os **problemas** encontrados, do mais grave para o mais leve, cada um com o trecho do seu prompt, o motivo de
+  dar bug e o que foi mudado;
+- o **prompt corrigido**, pronto para copiar e já dividido em blocos quando a fala não cabe no clipe (o Estúdio
+  confere cada bloco: no máximo 2.500 caracteres e fala que cabe no tempo do clipe no ritmo escolhido);
+- **alertas de alcance** no Reels (promessa de saúde, isca de engajamento...) e, se você contar o que pediu para a
+  IA, os **itens que ela colocou sem você pedir**, para você decidir se ficam (o que você tirar continua fora nas
+  correções seguintes, e dá para devolver).
+
+Ele conhece as travas que evitam os bugs mais comuns do Veo 3.1 (Google Flow), do Kling e do Seedance: corte da
+primeira palavra, fala corrida ou repetida, voz extra, legenda e letras tortas na tela, gêmeos no lugar de um
+casal, mãos deformando, sotaque de Portugal, configurações escritas no texto que só funcionam no Flow, gesto no
+fígado ou na barriga, carro parado, blocos de gancho, de pergunta lida e de reação. Prompt que ensina algo
+perigoso para quem copiar não volta no resultado. As regras ficam em `estudio/regras_prompts.md`.
+
+A correção leva de meio minuto a dois minutos. **Cancelar** (ou fechar a aba) encerra na hora a conversa com o
+Claude: daí em diante nada mais é gerado nem cobrado.
+
+O Corretor usa a mesma chave da API do Claude que o Analisador (`ANTHROPIC_API_KEY` no `.env`). Se ela ainda não
+estiver configurada, a própria aba explica como criar a chave em [console.anthropic.com](https://console.anthropic.com)
+e tem um campo para colar e salvar. O modelo pode ser trocado com `ESTUDIO_MODELO_CLAUDE` no `.env`. As últimas
+correções ficam guardadas no navegador.
+
 ## 🎬 Player de VSL
 
 A pasta [`player/`](player/README.md) tem um player de vídeo para páginas de vendas no estilo VTurb: autoplay
@@ -204,7 +231,9 @@ estudio/                   Estúdio de Reels
   exportar.py              renderiza cada trecho e emenda tudo sem recodificar o vídeo
   legendas.py              legendas: palavras em telas, posição no quadro e o .ass que o libass queima no vídeo
   transcricao.py           Whisper local com o tempo de cada palavra e a fila de transcrição em segundo plano
-  servidor.py              API local (FastAPI) e a tela; rotas_legendas.py tem a parte das legendas
+  corretor.py              Corretor de prompts: chamada ao Claude com saída estruturada e conferência dos blocos
+  regras_prompts.md        as regras do Corretor (vão no prompt de sistema, com cache)
+  servidor.py              API local (FastAPI) e a tela; rotas_legendas.py e rotas_corretor.py têm as partes novas
   static/                  a tela (JavaScript puro, sem build): linha do tempo, prévia e exportação
   static/legendas.js       o mesmo algoritmo do legendas.py, para a prévia (tests/casos_legendas.json confere)
   static/fontes/           Poppins (licença OFL): a mesma fonte na prévia e na exportação
@@ -216,5 +245,6 @@ pip install -r requirements.txt pytest
 python -m pytest
 node tests/e2e_estudio.cjs   # Estúdio num Chromium de verdade (precisa do playwright)
 node tests/e2e_estudio_legendas.cjs   # legendas na tela, com um Whisper falso (tests/servidor_teste_estudio.py)
+node tests/e2e_estudio_corretor.cjs   # Corretor de prompts, com a API do Claude simulada
 node tests/legendas_js.test.cjs       # o algoritmo das legendas em JavaScript (o pytest também roda este)
 ```
