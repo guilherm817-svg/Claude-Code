@@ -379,6 +379,19 @@ async function esperarServidor(base) {
   } catch (erro) {
     falhas++;
     console.log('  FAIL', erro.message);
+    // Para uma falha que não se repete dar para entender: em que linha do teste parou e o que estava na tela.
+    console.log((erro.stack || '').split('\n').filter((l) => l.includes('e2e_estudio_legendas')).slice(0, 2).join('\n'));
+    for (const [n, aberta] of navegador.contexts().flatMap((c) => c.pages()).entries()) {
+      const estado = await aberta.evaluate(() => ({
+        salvo: document.querySelector('#estado-salvo')?.textContent,
+        clipes: document.querySelectorAll('.clipe').length,
+        importando: document.querySelector('#importacoes')?.textContent,
+        avisos: document.querySelector('#avisos-flutuantes')?.textContent,
+      })).catch(() => null);
+      const imagem = path.join(os.tmpdir(), `e2e-legendas-falha-${n}.png`);
+      await aberta.screenshot({ path: imagem }).catch(() => {});
+      console.log(`  página ${n} (${aberta.url()}):`, JSON.stringify(estado), `captura em ${imagem}`);
+    }
   } finally {
     await navegador.close();
     servidores.forEach((s) => s.kill());
