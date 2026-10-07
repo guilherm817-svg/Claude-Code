@@ -492,8 +492,9 @@ function resumoDoCorte(item, midia) {
     + (removido > 0.005 ? ` · ${segundos(removido)} cortados` : '');
 }
 
-// Arrasto de uma alça do editor de corte do painel: { item, desenhar }. Enquanto ele dura, o painel não é refeito
-// (o canvas sairia da página no meio do arrasto, e o arrasto se perderia); só o desenho e os números mudam.
+// Arrasto de uma alça do editor de corte do painel: { item, canvas, desenhar }. Enquanto ele dura, o painel não é
+// refeito (o canvas sairia da página no meio do arrasto, e o arrasto se perderia); só o desenho e os números mudam.
+// Se o painel já foi trocado no meio do arrasto (Esc, e depois I ou O no mesmo clipe), ele é refeito por inteiro.
 let arrastoNoPainel = null;
 
 function desenharInspetor() {
@@ -502,7 +503,7 @@ function desenharInspetor() {
   // Quem está corrigindo o texto da legenda deste clipe não perde o cursor. Um campo de outro clipe (ou de um que
   // saiu da linha) encerra a correção e dá lugar à seleção atual.
   if (legendas.corrigindo(item)) return;
-  if (item && arrastoNoPainel?.item === item) {
+  if (item && arrastoNoPainel?.item === item && arrastoNoPainel.canvas.isConnected) {
     painel.querySelector('.resumo-corte').textContent = resumoDoCorte(item, midiaDe(item.midia_id));
     painel.querySelectorAll('.campo-corte output').forEach((valor, i) => { valor.textContent = segundos(i ? item.saida : item.entrada); });
     arrastoNoPainel.desenhar();
@@ -578,7 +579,10 @@ function editorDeCorte(item, midia) {
     if (e.button !== 0) return;
     const largura = canvas.clientWidth;
     const pps = largura / midia.duracao;
-    const x = e.clientX - canvas.getBoundingClientRect().left;
+    // Medido aqui, e não a cada movimento: se o painel for trocado no meio do arrasto, este canvas sai da página e
+    // passa a medir zero.
+    const esquerda = canvas.getBoundingClientRect().left;
+    const x = e.clientX - esquerda;
     const perto = (t) => Math.abs(t * pps - x) <= 10;
     const lado = perto(item.entrada) ? 'inicio' : perto(item.saida) ? 'fim' : null;
     const segmento = sequencia().find((s) => s.item.id === item.id);
@@ -590,12 +594,12 @@ function editorDeCorte(item, midia) {
     e.preventDefault();
     canvas.setPointerCapture(e.pointerId);
     comecarEdicao();
-    arrastoNoPainel = { item, desenhar };
+    arrastoNoPainel = { item, canvas, desenhar };
     // Na janela, e não no canvas: o arrasto termina (e entra no desfazer) mesmo que o ponteiro saia dele.
     const fim = new AbortController();
     const doArrasto = (ev) => ev.pointerId === e.pointerId;
     window.addEventListener('pointermove', (ev) => {
-      if (doArrasto(ev)) aparar(item.id, lado, (ev.clientX - canvas.getBoundingClientRect().left) / pps);
+      if (doArrasto(ev)) aparar(item.id, lado, (ev.clientX - esquerda) / pps);
     }, { signal: fim.signal });
     const soltar = (ev) => {
       if (!doArrasto(ev)) return;

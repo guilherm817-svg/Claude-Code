@@ -1,7 +1,7 @@
 // Teste do Estúdio de Reels num Chromium de verdade: importar, tocar, cortar, desfazer, dividir, reordenar e
-// exportar. Depois, os casos de borda da tela: arrastar a alça no painel do clipe, I e O na emenda, nome digitado sem
-// Enter, dois lotes de importação, clipe que a prévia não toca, cancelar a exportação logo no começo, salvamento que
-// falhou, régua com zoom alto e o dedo na régua (tela touch).
+// exportar. Depois, os casos de borda da tela: arrastar a alça no painel do clipe (também com Esc e O no meio do
+// arrasto), I e O na emenda, nome digitado sem Enter, dois lotes de importação, clipe que a prévia não toca, cancelar
+// a exportação logo no começo, salvamento que falhou, régua com zoom alto e o dedo na régua (tela touch).
 // Rode na raiz do projeto: node tests/e2e_estudio.cjs (precisa do playwright e do .venv instalado;
 // se o playwright estiver instalado globalmente, use NODE_PATH="$(npm root -g)"). Com CAPTURAS=<pasta>, guarda a
 // imagem da régua com zoom alto para olhar.
@@ -206,6 +206,34 @@ async function esperarServidor() {
     await esperarSalvo();
     q = await projetoDe(idCorte);
     conferir(q.linha.length === 3 && Math.abs(q.linha[0].saida - item0.saida) < 0.001, 'Ctrl+Z desfaz o corte feito no painel (e só ele)', cortes(q));
+
+    console.log('Esc e O no meio do arrasto da alça do painel');
+    await (await pagina.$$('.clipe'))[0].click({ position: { x: 40, y: 30 } }); // a agulha fica dentro do primeiro clipe
+    await pagina.waitForSelector('#inspetor canvas.editor-corte');
+    await sleep(200);
+    const errosAntes = erros.length;
+    await pagina.mouse.move(xAlca, yEditor);
+    await pagina.mouse.down();
+    await pagina.mouse.move(xAlca - 0.3 * ppsEditor, yEditor, { steps: 3 });
+    await pagina.keyboard.press('Escape'); // o painel do clipe dá lugar ao do projeto
+    await pagina.mouse.move(xAlca - 0.4 * ppsEditor, yEditor, { steps: 2 });
+    await pagina.keyboard.press('o'); // e o mesmo clipe volta a ser selecionado
+    const painelDepoisDoO = await pagina.textContent('#inspetor .painel-titulo');
+    await pagina.mouse.move(xAlca - 0.6 * ppsEditor, yEditor, { steps: 4 });
+    const resumoDepoisDoO = await pagina.textContent('#inspetor .resumo-corte').catch(() => null);
+    await pagina.mouse.up();
+    await esperarSalvo();
+    q = await projetoDe(idCorte);
+    const errosDoArrasto = erros.slice(errosAntes);
+    conferir(errosDoArrasto.length === 0 && painelDepoisDoO === 'Clipe selecionado'
+      && resumoDepoisDoO?.includes(`Usando ${(q.linha[0].saida - item0.entrada).toFixed(2).replace('.', ',')} s`),
+    'Esc e O no meio do arrasto: o painel volta ao clipe e acompanha o arrasto, sem erro', { errosDoArrasto, painelDepoisDoO, resumoDepoisDoO });
+    conferir(Math.abs(q.linha[0].saida - (item0.saida - 0.6)) < 0.05, 'depois do Esc, a alça continua indo para onde o mouse está',
+      { antes: item0.saida, depois: q.linha[0].saida });
+    await pagina.keyboard.press('Control+z');
+    await esperarSalvo();
+    q = await projetoDe(idCorte);
+    conferir(Math.abs(q.linha[0].saida - item0.saida) < 0.001, 'Ctrl+Z desfaz o arrasto inteiro', cortes(q));
 
     console.log('I e O perto da emenda entre dois clipes');
     const cortesOriginais = JSON.stringify(cortes(q));
