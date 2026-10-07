@@ -12,6 +12,7 @@ import re
 import secrets
 import shutil
 import threading
+import time
 import unicodedata
 from datetime import datetime
 from pathlib import Path
@@ -28,6 +29,7 @@ DURACAO_MINIMA = 0.1  # s: o menor trecho que a linha do tempo aceita
 MAX_PALAVRAS = 5000  # por clipe: muito mais do que cabe num clipe de IA
 MAX_LETRAS = 80  # por palavra
 TOLERANCIA_LEGENDA = 0.5  # s: o Whisper às vezes marca a última palavra um pouco depois do fim do clipe
+ESPERA_TROCA = 2.0  # s: quanto trocar_arquivo insiste antes de desistir
 
 Formato = Literal["reels", "feed", "quadrado", "youtube"]
 Enquadramento = Literal["preencher", "desfocado"]
@@ -47,6 +49,33 @@ def novo_id() -> str:
 
 def agora() -> str:
     return datetime.now().isoformat(timespec="seconds")
+
+
+def trocar_arquivo(origem: Path, destino: Path) -> None:
+    """Põe `origem` no lugar de `destino` de uma vez (os.replace), insistindo um pouco se o Windows recusar.
+
+    No Windows a troca dá PermissionError enquanto outro programa está com um dos arquivos aberto: o antivírus, o
+    indexador ou o OneDrive costumam ler por um instante cada arquivo recém-gravado.
+    """
+    limite = time.monotonic() + ESPERA_TROCA
+    espera = 0.01
+    while True:
+        try:
+            os.replace(origem, destino)
+            return
+        except PermissionError:
+            if time.monotonic() + espera > limite:
+                raise
+            time.sleep(espera)
+            espera = min(espera * 2, 0.25)
+
+
+def apagar_arquivos(*arquivos: Path) -> None:
+    for arquivo in arquivos:
+        try:
+            arquivo.unlink(missing_ok=True)
+        except OSError:
+            pass  # no Windows, o arquivo pode estar aberto pela prévia; sobra no disco, mas fora do projeto
 
 
 def conferir_legenda(palavras: list["Palavra"], duracao: float) -> list["Palavra"]:
@@ -207,31 +236,37 @@ class Estudio:
     def arquivo_onda(self, projeto_id: str, midia_id: str) -> Path:
         return self.pasta_cache(projeto_id) / f"{midia_id}-onda.json"
 
-    # Leitura e gravação
+    # Leitura e gravação. As leituras do projeto.json também pegam a trava: no Windows, trocar o arquivo enquanto
+    # outra thread o lê (o <video> da prévia pede a mídia o tempo todo) dá PermissionError.
 
     def listar(self) -> list[Projeto]:
+        with self._trava:
+            textos = [arquivo.read_text(encoding="utf-8") for arquivo in self.pasta.glob("*/projeto.json")]
         projetos = []
-        for arquivo in self.pasta.glob("*/projeto.json"):
+        for texto in textos:
             try:
-                projetos.append(Projeto.model_validate_json(arquivo.read_text(encoding="utf-8")))
+                projetos.append(Projeto.model_validate_json(texto))
             except ValueError:
                 continue  # projeto corrompido não derruba a lista
         return sorted(projetos, key=lambda p: p.atualizado_em, reverse=True)
 
     def abrir(self, projeto_id: str) -> Projeto:
         arquivo = self.pasta_projeto(projeto_id) / "projeto.json"
-        if not arquivo.exists():
-            raise ProjetoNaoEncontrado(projeto_id)
-        return Projeto.model_validate_json(arquivo.read_text(encoding="utf-8"))
+        with self._trava:
+            if not arquivo.exists():
+                raise ProjetoNaoEncontrado(projeto_id)
+            texto = arquivo.read_text(encoding="utf-8")
+        return Projeto.model_validate_json(texto)
 
     def salvar(self, projeto: Projeto) -> Projeto:
-        projeto.atualizado_em = agora()
-        pasta = self.pasta_projeto(projeto.id)
-        pasta.mkdir(parents=True, exist_ok=True)
-        temporario = pasta / "projeto.json.tmp"
-        temporario.write_text(projeto.model_dump_json(indent=1), encoding="utf-8")
-        os.replace(temporario, pasta / "projeto.json")  # troca atômica: nunca fica um projeto pela metade
-        return projeto
+        with self._trava:
+            projeto.atualizado_em = agora()
+            pasta = self.pasta_projeto(projeto.id)
+            pasta.mkdir(parents=True, exist_ok=True)
+            temporario = pasta / "projeto.json.tmp"
+            temporario.write_text(projeto.model_dump_json(indent=1), encoding="utf-8")
+            trocar_arquivo(temporario, pasta / "projeto.json")  # nunca fica um projeto pela metade
+            return projeto
 
     def criar(self, nome: str | None = None) -> Projeto:
         with self._trava:
@@ -302,33 +337,37 @@ class Estudio:
 
         midia_id = novo_id()
         destino = self.pasta_midia(projeto_id) / f"{midia_id}{extensao}"
+        tira, onda = self.arquivo_tira(projeto_id, midia_id), self.arquivo_onda(projeto_id, midia_id)
         destino.parent.mkdir(parents=True, exist_ok=True)
         self.pasta_cache(projeto_id).mkdir(parents=True, exist_ok=True)
-        with open(destino, "wb") as saida:
-            shutil.copyfileobj(origem, saida, length=1024 * 1024)
-
         try:
-            analise = analisar(destino)
-        except ErroMidia as erro:
-            destino.unlink(missing_ok=True)
-            raise ErroImportacao(f"“{nome_original}”: {erro}") from erro
-        info = analise.info
-        quadros = gerar_tira(destino, self.arquivo_tira(projeto_id, midia_id), info.duracao)
-        self.arquivo_onda(projeto_id, midia_id).write_text(json.dumps(analise.onda), encoding="utf-8")
+            with open(destino, "wb") as saida:
+                shutil.copyfileobj(origem, saida, length=1024 * 1024)
+            try:
+                analise = analisar(destino)
+            except ErroMidia as erro:
+                raise ErroImportacao(f"“{nome_original}”: {erro}") from erro
+            info = analise.info
+            quadros = gerar_tira(destino, tira, info.duracao)
+            onda.write_text(json.dumps(analise.onda), encoding="utf-8")
 
-        midia = Midia(
-            id=midia_id, nome=Path(nome_original).name, arquivo=destino.name, duracao=info.duracao,
-            largura=info.largura, altura=info.altura, fps=info.fps, codec=info.codec, tem_audio=info.tem_audio,
-            fala_inicio=analise.fala[0] if analise.fala else None, fala_fim=analise.fala[1] if analise.fala else None,
-            tira_quadros=quadros, avisos=[Aviso(**a) for a in analise.avisos], importada_em=agora(),
-        )
-        entrada, saida = midia.corte_sugerido()
-        item = Item(id=novo_id(), midia_id=midia_id, entrada=entrada, saida=saida)
-        with self._trava:
-            projeto = self.abrir(projeto_id)
-            projeto.midias.append(midia)
-            projeto.linha.append(item)
-            return self.salvar(projeto), midia, item
+            midia = Midia(
+                id=midia_id, nome=Path(nome_original).name, arquivo=destino.name, duracao=info.duracao,
+                largura=info.largura, altura=info.altura, fps=info.fps, codec=info.codec, tem_audio=info.tem_audio,
+                fala_inicio=analise.fala[0] if analise.fala else None,
+                fala_fim=analise.fala[1] if analise.fala else None,
+                tira_quadros=quadros, avisos=[Aviso(**a) for a in analise.avisos], importada_em=agora(),
+            )
+            entrada, saida = midia.corte_sugerido()
+            item = Item(id=novo_id(), midia_id=midia_id, entrada=entrada, saida=saida)
+            with self._trava:
+                projeto = self.abrir(projeto_id)
+                projeto.midias.append(midia)
+                projeto.linha.append(item)
+                return self.salvar(projeto), midia, item
+        except BaseException:
+            apagar_arquivos(destino, tira, onda)  # fora do projeto, a cópia só ocuparia espaço
+            raise
 
     def remover_midia(self, projeto_id: str, midia_id: str) -> Projeto:
         with self._trava:
@@ -340,10 +379,6 @@ class Estudio:
             projeto.linha = [i for i in projeto.linha if i.midia_id != midia_id]
             projeto.legendas.pop(midia_id, None)
             self.salvar(projeto)
-        for arquivo in (self.arquivo_midia(projeto_id, midia), self.arquivo_tira(projeto_id, midia_id),
-                        self.arquivo_onda(projeto_id, midia_id)):
-            try:
-                arquivo.unlink(missing_ok=True)
-            except OSError:
-                pass  # no Windows, o arquivo pode estar aberto pela prévia; sobra no disco, mas fora do projeto
+        apagar_arquivos(self.arquivo_midia(projeto_id, midia), self.arquivo_tira(projeto_id, midia_id),
+                        self.arquivo_onda(projeto_id, midia_id))
         return projeto

@@ -18,7 +18,7 @@ from pathlib import Path
 
 from . import config, legendas
 from .midia import SEM_JANELA, ffmpeg, medir_volume
-from .projetos import Estudio, Item, Projeto, novo_id
+from .projetos import Estudio, Item, Projeto, novo_id, trocar_arquivo
 
 PASTA_FONTES = Path(__file__).parent / "static" / "fontes"
 
@@ -296,7 +296,7 @@ class Exportador:
                 finally:
                     if ass:
                         (cache / ass).unlink(missing_ok=True)
-                temporario.replace(destino)
+                trocar_arquivo(temporario, destino)
             feito += duracao
             exp.progresso = 0.1 + 0.85 * feito / total
             prontos.append(destino)
@@ -312,7 +312,7 @@ class Exportador:
         try:
             self._ffmpeg(exp, comando_juntar(lista, temporario),
                          lambda t: setattr(exp, "progresso", 0.95 + 0.05 * min(t / total, 1)))
-            temporario.replace(pasta_saida / nome)
+            trocar_arquivo(temporario, pasta_saida / nome)
         finally:
             temporario.unlink(missing_ok=True)
 
