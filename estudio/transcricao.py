@@ -16,7 +16,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from . import config
-from .midia import ler_audio
+from .midia import ler_audio, sondar
 from .projetos import MAX_LETRAS, Estudio, Palavra, ProjetoNaoEncontrado, novo_id
 
 log = logging.getLogger(__name__)
@@ -85,7 +85,8 @@ def transcrever(caminho: Path, idioma: str | None = None, modelo: str = config.M
                 dispositivo: str = config.DISPOSITIVO) -> Transcricao:
     """O idioma falado e cada palavra com início e fim. idioma None: o Whisper detecta."""
     global _gpu_indisponivel
-    audio = ler_audio(caminho)
+    info = sondar(caminho)  # a faixa de áudio certa: a primeira pode ser uma que o ffmpeg não decodifica
+    audio = ler_audio(caminho, faixa=info.faixa_audio) if info.tem_audio else []
     if not len(audio):
         return Transcricao(idioma=idioma or "", palavras=[])
     if dispositivo == "auto" and _gpu_indisponivel:

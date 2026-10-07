@@ -39,11 +39,39 @@ def ffmpeg() -> str:
 SEM_JANELA = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 
 
+ERRO_AO_RODAR = ("Não consegui rodar o ffmpeg, o programa que o Estúdio usa para ler e montar os vídeos. Confira se "
+                 "o antivírus não bloqueou o ffmpeg.exe e tente de novo.")
+
+
 def rodar(args: list[str]) -> subprocess.CompletedProcess:
-    return subprocess.run([ffmpeg(), "-hide_banner", "-nostdin", *args], capture_output=True, creationflags=SEM_JANELA)
+    try:
+        return subprocess.run([ffmpeg(), "-hide_banner", "-nostdin", *args], capture_output=True,
+                              creationflags=SEM_JANELA)
+    except OSError as erro:  # no Windows, antivírus ou Smart App Control barrando o ffmpeg.exe
+        raise ErroMidia(ERRO_AO_RODAR) from erro
+
+
+@lru_cache(maxsize=1)
+def filtros() -> frozenset[str]:
+    """Os filtros que este ffmpeg tem. Nem todo build traz os opcionais, como o zscale e o tonemap."""
+    texto = rodar(["-filters"]).stdout.decode("utf-8", "replace")
+    return frozenset(re.findall(r"^ [A-Z.|]{3} (\w+) ", texto, re.M))
 
 
 # Sondagem
+
+
+@dataclass
+class Cor:
+    """As marcações de cor do vídeo, como o ffmpeg mostra. Vazio: o arquivo não diz."""
+    matriz: str = ""  # bt709, bt470bg, bt2020nc…
+    primarias: str = ""
+    transferencia: str = ""  # arib-std-b67 é o HLG do iPhone; smpte2084, o PQ (HDR10)
+    faixa: str = ""  # tv (limitada) ou pc (completa)
+
+    @property
+    def hdr(self) -> bool:
+        return self.transferencia in ("arib-std-b67", "smpte2084")
 
 
 @dataclass
@@ -54,14 +82,21 @@ class InfoVideo:
     fps: float
     codec: str
     tem_audio: bool
+    faixa_audio: int = 0  # a faixa de áudio usada (0:a:N): a primeira que o ffmpeg sabe decodificar
+    cor: Cor = field(default_factory=Cor)
 
 
 _DURACAO = re.compile(r"Duration: (\d+):(\d{2}):(\d{2}(?:\.\d+)?)")
-_STREAM = re.compile(r"^\s*Stream #\d+:\d+.*?: (Video|Audio|Subtitle|Data|Attachment): (.*)$")
+_STREAM = re.compile(r"^\s*Stream #\d+:(\d+).*?: (Video|Audio|Subtitle|Data|Attachment): (.*)$")
+_SEM_PARAMETROS = re.compile(r"could not find codec parameters for stream (\d+)", re.I)
 _TAMANHO = re.compile(r"(?:^|[ ,])(\d{2,5})x(\d{2,5})(?=[ ,\[]|$)")
 _FPS = re.compile(r"(\d+(?:\.\d+)?)(k?) fps")
 _TBR = re.compile(r"(\d+(?:\.\d+)?)(k?) tbr")
 _ROTACAO = re.compile(r"rotation of (-?\d+(?:\.\d+)?) degrees|^\s*rotate\s*:\s*(-?\d+)")
+# O formato dos pixels vem colado nos parênteses com a faixa e as cores: "yuv420p10le(tv, bt2020nc/bt2020/smpte2084)".
+_PIXELS = re.compile(r", [a-z0-9_]+\(([^)]*)\)")
+_MATRIZES = {"rgb", "bt709", "fcc", "bt470bg", "smpte170m", "smpte240m", "ycgco", "bt2020nc", "bt2020c", "smpte2085",
+             "chroma-derived-nc", "chroma-derived-c", "ictcp"}
 
 
 def _taxa(regex: re.Pattern, texto: str) -> float:
@@ -69,27 +104,51 @@ def _taxa(regex: re.Pattern, texto: str) -> float:
     return float(m.group(1)) * (1000 if m.group(2) else 1) if m else 0.0
 
 
-def interpretar_sonda(texto: str) -> InfoVideo:
-    """Lê a saída de `ffmpeg -i arquivo` (o ffmpeg embutido não traz o ffprobe)."""
-    duracao = 0.0
+def _cor(video: str) -> Cor:
+    cor = Cor()
+    if not (m := _PIXELS.search(video)):
+        return cor
+    for parte in m.group(1).split(", "):
+        if parte in ("tv", "pc"):
+            cor.faixa = parte
+        elif parte.count("/") == 2 or parte in _MATRIZES:
+            nomes = parte.split("/") if "/" in parte else [parte] * 3  # as três iguais vêm num nome só
+            cor.matriz, cor.primarias, cor.transferencia = ("" if n == "unknown" else n for n in nomes)
+    return cor
+
+
+def interpretar_sonda(texto: str, duracao_medida: float = 0.0) -> InfoVideo:
+    """Lê a saída de `ffmpeg -i arquivo` (o ffmpeg embutido não traz o ffprobe). duracao_medida: a duração medida
+    lendo o arquivo, usada quando o cabeçalho não traz a duração (Duration: N/A)."""
+    duracao = duracao_medida
     if m := _DURACAO.search(texto):
         h, mi, s = m.groups()
         duracao = int(h) * 3600 + int(mi) * 60 + float(s)
 
-    video, rotacao, tem_audio, no_video = None, 0, False, False
+    # Stream que o ffmpeg não sabe decodificar (como o áudio espacial APAC do iPhone 16) não impede de usar os outros.
+    sem_parametros = {int(n) for n in _SEM_PARAMETROS.findall(texto)}
+    video, ilegivel, rotacao, faixa_audio, no_video = None, False, 0, None, False
+    n_audio = 0
     for linha in texto.splitlines():
         if s := _STREAM.match(linha):
-            tipo, resto = s.groups()
+            indice, tipo, resto = int(s.group(1)), s.group(2), s.group(3)
+            legivel = indice not in sem_parametros and not resto.startswith("none")
             no_video = False
             if tipo == "Video" and video is None and "attached pic" not in resto:
-                video, no_video = resto, True
+                if legivel:
+                    video, no_video = resto, True
+                else:
+                    ilegivel = True
             elif tipo == "Audio":
-                tem_audio = True
+                if legivel and faixa_audio is None:
+                    faixa_audio = n_audio
+                n_audio += 1
         elif no_video and (r := _ROTACAO.search(linha)):
             rotacao = round(float(r.group(1) or r.group(2)))
 
     if video is None:
-        raise ErroMidia("O arquivo não tem vídeo.")
+        raise ErroMidia("Este arquivo não é um vídeo que o ffmpeg consiga ler." if ilegivel else
+                        "O arquivo não tem vídeo.")
     tamanho = _TAMANHO.search(video)
     if not tamanho:
         raise ErroMidia("Não consegui ler o tamanho do vídeo.")
@@ -101,27 +160,42 @@ def interpretar_sonda(texto: str) -> InfoVideo:
     return InfoVideo(
         duracao=round(duracao, 3), largura=largura, altura=altura,
         fps=round(_taxa(_FPS, video) or _taxa(_TBR, video) or 30.0, 3),
-        codec=video.split(maxsplit=1)[0].strip(","), tem_audio=tem_audio,
+        codec=video.split(maxsplit=1)[0].strip(","), tem_audio=faixa_audio is not None,
+        faixa_audio=faixa_audio or 0, cor=_cor(video),
     )
+
+
+def medir_duracao(caminho: Path) -> float:
+    """Duração lida percorrendo o arquivo sem decodificar, para vídeos sem a duração no cabeçalho (o WebM gravado
+    pelo navegador ou por gravadores de tela). 0 se não der."""
+    r = rodar(["-v", "error", "-i", str(caminho), "-map", "0:v:0", "-c", "copy", "-progress", "pipe:1", "-nostats",
+               "-f", "null", "-"])
+    tempos = re.findall(r"^out_time_us=(\d+)", r.stdout.decode("ascii", "replace"), re.M)
+    return int(tempos[-1]) / 1_000_000 if tempos else 0.0
 
 
 def sondar(caminho: Path) -> InfoVideo:
     texto = rodar(["-i", str(caminho)]).stderr.decode("utf-8", "replace")
-    if "Invalid data found" in texto or "could not find codec parameters" in texto.lower():
+    if not re.search(r"^\s*Stream #", texto, re.M):
         raise ErroMidia("Este arquivo não é um vídeo que o ffmpeg consiga ler.")
-    return interpretar_sonda(texto)
+    return interpretar_sonda(texto, 0.0 if _DURACAO.search(texto) else medir_duracao(caminho))
 
 
 # Áudio
 
 
-def ler_audio(caminho: Path, taxa: int = TAXA_ANALISE) -> np.ndarray:
-    """Áudio em mono, float32 entre -1 e 1. Vazio se o arquivo não tiver som."""
-    r = rodar(["-v", "error", "-i", str(caminho), "-map", "0:a:0", "-vn", "-ac", "1", "-ar", str(taxa),
-               "-f", "s16le", "-"])
+def ler_audio(caminho: Path, taxa: int = TAXA_ANALISE, faixa: int = 0) -> np.ndarray:
+    """Áudio em mono, float32 entre -1 e 1, no tempo do vídeo. Vazio se o arquivo não tiver som.
+
+    A saída crua não leva os tempos: sem o aresample, um áudio que começa depois do vídeo (comum em vídeo de celular
+    ou recortado em outro programa) chegaria adiantado, e a fala, a onda e as legendas sairiam fora do lugar."""
+    r = rodar(["-v", "error", "-i", str(caminho), "-map", f"0:a:{faixa}", "-vn", "-af", "aresample=async=1:first_pts=0",
+               "-ac", "1", "-ar", str(taxa), "-f", "s16le", "-"])
     if r.returncode != 0:
         return np.zeros(0, dtype=np.float32)
-    return np.frombuffer(r.stdout, dtype="<i2").astype(np.float32) / 32768.0
+    audio = np.frombuffer(r.stdout, dtype="<i2").astype(np.float32)
+    audio /= 32768.0  # no lugar, para um vídeo longo não ocupar o dobro de memória
+    return audio
 
 
 def _rms_db(audio: np.ndarray, taxa: int, janela_s: float = 0.02, passo_s: float = 0.01) -> tuple[np.ndarray, int, int]:
@@ -129,9 +203,12 @@ def _rms_db(audio: np.ndarray, taxa: int, janela_s: float = 0.02, passo_s: float
     if len(audio) < janela:
         return np.zeros(0), janela, passo
     n = 1 + (len(audio) - janela) // passo
-    acumulado = np.concatenate([[0.0], np.cumsum(audio.astype(np.float64) ** 2)])
+    # Soma acumulada feita no lugar: num vídeo longo, cada cópia do áudio em float64 ocupa centenas de MB.
+    acumulado = np.square(audio, dtype=np.float64)
+    np.cumsum(acumulado, out=acumulado)
     inicios = np.arange(n) * passo
-    rms = np.sqrt(np.maximum(acumulado[inicios + janela] - acumulado[inicios], 0) / janela)
+    antes = np.where(inicios > 0, acumulado[np.maximum(inicios - 1, 0)], 0.0)
+    rms = np.sqrt(np.maximum(acumulado[inicios + janela - 1] - antes, 0) / janela)
     return 20 * np.log10(rms + 1e-9), janela, passo
 
 
@@ -309,8 +386,8 @@ def detectar_fala(audio: np.ndarray, taxa: int = TAXA_ANALISE) -> tuple[float, f
 def picos_onda(audio: np.ndarray, taxa: int = TAXA_ANALISE) -> dict:
     """Forma de onda resumida para desenhar na tela: o pico de cada pedacinho, de 0 a 1."""
     duracao = len(audio) / taxa if taxa else 0
-    por_segundo = 100 if duracao <= 120 else max(10, int(12000 / duracao))
-    tamanho = max(1, taxa // por_segundo)
+    tamanho = max(1, taxa // (100 if duracao <= 120 else max(10, int(12000 / duracao))))
+    por_segundo = taxa / tamanho  # a taxa real: a tela acha cada pico por t·por_segundo
     n = len(audio) // tamanho
     if n == 0:
         return {"por_segundo": por_segundo, "picos": []}
@@ -321,9 +398,9 @@ def picos_onda(audio: np.ndarray, taxa: int = TAXA_ANALISE) -> dict:
     return {"por_segundo": por_segundo, "picos": [round(float(p), 3) for p in picos]}
 
 
-def medir_volume(caminho: Path, entrada: float, duracao: float) -> tuple[float, float] | None:
+def medir_volume(caminho: Path, entrada: float, duracao: float, faixa: int = 0) -> tuple[float, float] | None:
     """Volume percebido (LUFS) e pico real (dBTP) de um trecho. None se o trecho for mudo ou curto demais."""
-    r = rodar(["-nostats", "-ss", f"{entrada:.3f}", "-t", f"{duracao:.3f}", "-i", str(caminho), "-map", "0:a:0",
+    r = rodar(["-nostats", "-ss", f"{entrada:.3f}", "-t", f"{duracao:.3f}", "-i", str(caminho), "-map", f"0:a:{faixa}",
                "-af", "loudnorm=print_format=json", "-f", "null", "-"])
     texto = r.stderr.decode("utf-8", "replace")
     inicio, fim = texto.rfind("{"), texto.rfind("}")
@@ -384,7 +461,7 @@ def avisos_do_clipe(info: InfoVideo, fala: tuple[float, float] | None, onda: dic
 
 def analisar(caminho: Path) -> AnaliseClipe:
     info = sondar(caminho)
-    audio = ler_audio(caminho) if info.tem_audio else np.zeros(0, dtype=np.float32)
+    audio = ler_audio(caminho, faixa=info.faixa_audio) if info.tem_audio else np.zeros(0, dtype=np.float32)
     medida = medir_fala(audio)
     fala = (medida.inicio, medida.fim) if medida else None
     onda = picos_onda(audio)

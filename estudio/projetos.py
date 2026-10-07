@@ -41,6 +41,17 @@ class ErroImportacao(Exception):
     pass
 
 
+def motivo_da_falha(erro: Exception) -> str:
+    """O porquê de uma falha inesperada, em palavras que dá para mostrar na tela."""
+    if isinstance(erro, MemoryError):
+        return "faltou memória para analisar o vídeo. Feche outros programas ou use um clipe mais curto."
+    if isinstance(erro, OSError):
+        detalhe = erro.strerror or str(erro)
+        return (f"não deu para ler ou gravar um arquivo na pasta do projeto ({detalhe}). Um antivírus ou o OneDrive "
+                "pode estar usando a pasta; tente de novo daqui a pouco.")
+    return str(erro) or erro.__class__.__name__
+
+
 def novo_id() -> str:
     return secrets.token_hex(6)
 
@@ -302,33 +313,44 @@ class Estudio:
 
         midia_id = novo_id()
         destino = self.pasta_midia(projeto_id) / f"{midia_id}{extensao}"
-        destino.parent.mkdir(parents=True, exist_ok=True)
-        self.pasta_cache(projeto_id).mkdir(parents=True, exist_ok=True)
-        with open(destino, "wb") as saida:
-            shutil.copyfileobj(origem, saida, length=1024 * 1024)
-
+        tira, onda = self.arquivo_tira(projeto_id, midia_id), self.arquivo_onda(projeto_id, midia_id)
         try:
-            analise = analisar(destino)
-        except ErroMidia as erro:
-            destino.unlink(missing_ok=True)
-            raise ErroImportacao(f"“{nome_original}”: {erro}") from erro
-        info = analise.info
-        quadros = gerar_tira(destino, self.arquivo_tira(projeto_id, midia_id), info.duracao)
-        self.arquivo_onda(projeto_id, midia_id).write_text(json.dumps(analise.onda), encoding="utf-8")
+            destino.parent.mkdir(parents=True, exist_ok=True)
+            self.pasta_cache(projeto_id).mkdir(parents=True, exist_ok=True)
+            with open(destino, "wb") as saida:
+                shutil.copyfileobj(origem, saida, length=1024 * 1024)
 
-        midia = Midia(
-            id=midia_id, nome=Path(nome_original).name, arquivo=destino.name, duracao=info.duracao,
-            largura=info.largura, altura=info.altura, fps=info.fps, codec=info.codec, tem_audio=info.tem_audio,
-            fala_inicio=analise.fala[0] if analise.fala else None, fala_fim=analise.fala[1] if analise.fala else None,
-            tira_quadros=quadros, avisos=[Aviso(**a) for a in analise.avisos], importada_em=agora(),
-        )
-        entrada, saida = midia.corte_sugerido()
-        item = Item(id=novo_id(), midia_id=midia_id, entrada=entrada, saida=saida)
-        with self._trava:
-            projeto = self.abrir(projeto_id)
-            projeto.midias.append(midia)
-            projeto.linha.append(item)
-            return self.salvar(projeto), midia, item
+            analise = analisar(destino)
+            info = analise.info
+            quadros = gerar_tira(destino, tira, info.duracao)
+            onda.write_text(json.dumps(analise.onda), encoding="utf-8")
+
+            midia = Midia(
+                id=midia_id, nome=Path(nome_original).name, arquivo=destino.name, duracao=info.duracao,
+                largura=info.largura, altura=info.altura, fps=info.fps, codec=info.codec, tem_audio=info.tem_audio,
+                fala_inicio=analise.fala[0] if analise.fala else None,
+                fala_fim=analise.fala[1] if analise.fala else None,
+                tira_quadros=quadros, avisos=[Aviso(**a) for a in analise.avisos], importada_em=agora(),
+            )
+            entrada, saida = midia.corte_sugerido()
+            item = Item(id=novo_id(), midia_id=midia_id, entrada=entrada, saida=saida)
+            with self._trava:
+                projeto = self.abrir(projeto_id)
+                projeto.midias.append(midia)
+                projeto.linha.append(item)
+                return self.salvar(projeto), midia, item
+        except Exception as erro:
+            # Nada do clipe fica no disco sem estar no projeto: a cópia, a tira e a onda saem juntas.
+            for arquivo in (destino, tira, onda):
+                try:
+                    arquivo.unlink(missing_ok=True)
+                except OSError:
+                    pass  # o antivírus ainda lendo a cópia, no Windows
+            if isinstance(erro, (ErroImportacao, ProjetoNaoEncontrado)):
+                raise
+            if isinstance(erro, ErroMidia):
+                raise ErroImportacao(f"“{nome_original}”: {erro}") from erro
+            raise ErroImportacao(f"Não consegui importar “{nome_original}”: {motivo_da_falha(erro)}") from erro
 
     def remover_midia(self, projeto_id: str, midia_id: str) -> Projeto:
         with self._trava:
