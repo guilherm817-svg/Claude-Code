@@ -147,8 +147,13 @@ Ele roda no seu computador, como o Analisador: os vídeos não saem da sua máqu
    Terminal aberta enquanto usa; feche-a para encerrar.
 
 Se o Mac disser que não pode verificar o arquivo: abra **Ajustes do Sistema › Privacidade e Segurança**, role até o
-fim e clique em **Abrir Mesmo Assim** (só na primeira vez). Outro caminho: abra o Terminal, digite `bash ` (com o
-espaço), arraste o arquivo `iniciar-estudio.sh` para a janela e aperte Enter.
+fim e clique em **Abrir Mesmo Assim** (só na primeira vez). Se ele disser que você não tem permissão, ou se os dois
+cliques não fizerem nada, abra o **Terminal** (⌘ + Espaço, digite "Terminal"), cole este comando e aperte Enter. Ele
+acha o Estúdio na pasta Downloads, libera os arquivos e abre o app; depois disso, os dois cliques passam a funcionar:
+
+```
+P="$(find ~/Downloads -maxdepth 3 -name iniciar-estudio.sh 2>/dev/null | head -1)"; if [ -n "$P" ]; then cd "$(dirname "$P")" && { xattr -dr com.apple.quarantine . 2>/dev/null; chmod +x *.command *.sh; bash iniciar-estudio.sh; }; else echo "Não achei o Estúdio na pasta Downloads. Descompacte o ZIP lá e tente de novo."; fi
+```
 
 Use o Google Chrome, que é onde o Estúdio foi testado (o Safari também deve funcionar). No Windows, abra pelo
 `iniciar-estudio.bat`; no Linux, pelo `./iniciar-estudio.sh`.
