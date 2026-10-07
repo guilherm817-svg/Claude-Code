@@ -209,7 +209,7 @@ kbd { padding: 1px 6px; border: 1px solid var(--borda-forte); border-bottom-widt
 .zoom { width: 140px; accent-color: var(--destaque); }
 .linha-rolagem { position: relative; flex: 1; overflow-x: auto; overflow-y: hidden; }
 .linha-conteudo { position: relative; height: 100%; min-width: 100%; }
-.regua { position: absolute; top: 0; left: 0; height: 26px; cursor: pointer; border-bottom: 1px solid var(--borda); }
+.regua { position: absolute; top: 0; left: 0; height: 26px; cursor: pointer; border-bottom: 1px solid var(--borda); touch-action: none; }
 .trilha { position: absolute; top: 34px; left: 0; right: 0; height: 104px; cursor: pointer; }
 .trilha-vazia { position: absolute; inset: 40px 16px 16px; display: flex; align-items: center; justify-content: center;
   border: 1.5px dashed var(--borda-forte); border-radius: var(--raio); color: var(--texto-3); pointer-events: none; }
