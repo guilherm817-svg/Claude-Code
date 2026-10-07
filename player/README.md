@@ -34,6 +34,7 @@ bloco num elemento de **HTML personalizado** da sua página (Atomicat, Elementor
 
 ```html
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/guilherm817-svg/Claude-Code@f8381a0cab1124a65b2d0b50196784c41ce66235/player/vsl-player.css">
+<style>#botao-oferta:not(.vsl-visible){display:none!important}</style>
 
 <div class="vsl-player"
      data-id="vsl-principal"
@@ -44,13 +45,15 @@ bloco num elemento de **HTML personalizado** da sua página (Atomicat, Elementor
      data-show="#botao-oferta"></div>
 
 <script src="https://cdn.jsdelivr.net/gh/guilherm817-svg/Claude-Code@f8381a0cab1124a65b2d0b50196784c41ce66235/player/vsl-player.js"></script>
-<script>setTimeout(function(){if(!window.VSLPlayer)document.querySelectorAll('[data-vsl-show-at]').forEach(function(e){e.classList.add('vsl-visible')})},10000)</script>
+<script>setTimeout(function(){if(!window.VSLPlayer)document.querySelectorAll('[data-vsl-show-at],#botao-oferta').forEach(function(e){e.classList.add('vsl-visible')})},10000)</script>
 ```
 
 É **um `<script>` do player só**: se o vídeo for `.m3u8`, o hls.js é baixado pelo próprio player quando
 precisa. `data-show="#botao-oferta"` esconde o botão de compra da página (pelo seletor CSS) até o pitch, sem
-precisar editar o HTML do botão. A última linha é a garantia (*fail-open*): se o script do player não
-carregar em 10 s, os elementos com delay aparecem mesmo assim.
+precisar editar o HTML do botão. A linha `<style>` esconde esse botão desde a primeira pintura da página: sem
+ela, ele fica visível até o script do player chegar e rodar (um piscar do botão na primeira dobra do celular
+quando o CDN demora ou a página é pesada). A última linha é a garantia (*fail-open*): se o script do player
+não carregar em 10 s, os elementos com delay aparecem mesmo assim; por isso ela repete o seletor do botão.
 
 O endereço está preso a uma versão específica (o código depois do `@`), então ele nunca muda debaixo de você.
 Para pegar uma versão nova, troque esse código pelo da versão desejada.
@@ -193,6 +196,27 @@ por exemplo), aponte o seletor no próprio player:
 
 Os elementos casados viram `data-vsl-show-at` com o tempo de `data-show-at` (ou do pitch, se omitido) e
 seguem as mesmas regras: escondidos até o tempo, visíveis ao recarregar, liberados em caso de erro.
+
+Uma diferença importante: o `data-show` só age quando o script do player roda. Até lá o elemento fica
+**visível** (já com `data-vsl-show-at` no próprio elemento, o CSS do player o esconde desde a primeira
+pintura). Em páginas pesadas, ou com o script vindo devagar do CDN, o botão de compra aparece e some logo
+depois: um piscar na primeira dobra do celular. Para evitar:
+
+- Se o construtor deixa editar os atributos do elemento, prefira `data-vsl-show-at="12:30"` nele mesmo.
+- Com `data-show`, acrescente um `<style>` com o mesmo seletor antes do player e repita o seletor na linha
+  de garantia (*fail-open*), para o botão aparecer mesmo se o script não carregar:
+
+```html
+<style>#botao-oferta:not(.vsl-visible){display:none!important}</style>
+<div class="vsl-player" data-src="..." data-pitch="12:30" data-show="#botao-oferta"></div>
+<script src="vsl-player.js"></script>
+<script>setTimeout(function(){if(!window.VSLPlayer)document.querySelectorAll('[data-vsl-show-at],#botao-oferta').forEach(function(e){e.classList.add('vsl-visible')})},10000)</script>
+```
+
+  O player acrescenta a classe `vsl-visible` quando chega a hora (ou ao falhar), e o `<style>` deixa de valer.
+  O atributo `hidden` no elemento também funciona (o player o remove ao liberar), mas só se o CSS da página
+  não definir `display` para esse elemento, o que é comum em botões de construtores; o `<style>` acima vale
+  em qualquer caso.
 
 ## Miniatura de pausa e tela final com botão
 
@@ -387,7 +411,9 @@ por conta própria (uma vez por página, compartilhado entre os players) quando 
 Qualquer hospedagem que sirva o arquivo direto por HTTPS com suporte a *range requests* (padrão em
 Bunny Storage/Stream, Cloudflare R2/Stream, Amazon S3 + CloudFront, Backblaze B2, Vimeo com link direto etc.).
 Links do YouTube, Google Drive e Dropbox não funcionam. Para VSLs longas, prefira HLS: começa mais rápido e
-adapta a qualidade à conexão.
+adapta a qualidade à conexão. Sem *range requests* o navegador também não consegue voltar à posição depois
+de uma retentativa (o vídeo recomeça do zero); a posição salva não se perde, e o "continuar de onde parou"
+ao voltar à página continua certo.
 
 Exporte o MP4 com `faststart` (os metadados no início do arquivo) para o vídeo começar antes de baixar tudo:
 `ffmpeg -i entrada.mp4 -c copy -movflags +faststart vsl.mp4`.
@@ -424,8 +450,11 @@ A pasta `testes/` tem um teste automatizado que abre o player em um Chromium de 
 confere autoplay, clique para ouvir, pausa, delay de elementos (`data-vsl-show-at` e `data-show`), retomada,
 fim do vídeo, travas de velocidade e de pulo, `data-speed`, autoplay bloqueado, vídeo 404 com retentativas e
 botão "Tentar de novo", carregamento lento e watchdog, pitch com som e aba visível, analytics (sessão muda e
-com som), toques no celular, miniatura de pausa, tela final com botão e HLS (com um `window.Hls` falso, já
-que o teste roda sem internet). Precisa de Node 18+, ffmpeg e Playwright:
+com som), toques no celular, miniatura de pausa, tela final com botão, HLS (com um `window.Hls` falso, já
+que o teste roda sem internet), erro no meio de uma sessão com som (a posição sobrevive à retentativa e ao
+"Tentar de novo", com e sem *range requests*; rede presa vira "toque para continuar") e erro com o visitante
+pausado ou no "continuar de onde parou?" (a retentativa não retoma sozinha e a miniatura de pausa fica).
+Precisa de Node 18+, ffmpeg e Playwright:
 
 ```bash
 cd player/testes

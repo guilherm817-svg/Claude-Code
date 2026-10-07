@@ -444,6 +444,10 @@ export async function resumo(db, { player = null, de = null, ate = null, pitch =
     }
   }
   const cliques = linhas.reduce((n, s) => n + s.clicou, 0);
+  // Só os cliques de quem chegou ao pitch (com som) entram no funil e na taxa: assim o funil é decrescente e a taxa
+  // nunca passa de 100 %. Um clique de sessão muda (tela final de um autoplay, botão da página liberado por tempo)
+  // ou antes do pitch continua contando em `cliques`.
+  const cliquesPitch = chegaramPitch.reduce((n, s) => n + s.clicou, 0);
   const erros = linhas.reduce((n, s) => n + s.errou, 0);
 
   const porDia = Object.create(null);
@@ -465,23 +469,25 @@ export async function resumo(db, { player = null, de = null, ate = null, pitch =
     }
   }
 
-  // Tabelas por origem, dispositivo, navegador, criativo e campanha: {nome, sessoes, plays, pitch, terminaram, cliques}.
+  // Tabelas por origem, dispositivo, navegador, criativo e campanha:
+  // {nome, sessoes, plays, pitch, terminaram, cliques, cliques_pitch} (cliques_pitch: cliques de quem chegou ao pitch).
   // `vazio` é o nome mostrado quando a coluna está em branco; acima de `limite` grupos, o resto vira "outras".
-  const CHAVES_GRUPO = ['sessoes', 'plays', 'pitch', 'terminaram', 'cliques'];
+  const CHAVES_GRUPO = ['sessoes', 'plays', 'pitch', 'terminaram', 'cliques', 'cliques_pitch'];
   const agrupar = (chave, limite = null, vazio = '') => {
     const grupos = Object.create(null);
     for (const s of linhas) {
       const nome = s[chave] || vazio;
-      const g = grupos[nome] || (grupos[nome] = { nome, sessoes: 0, plays: 0, pitch: 0, terminaram: 0, cliques: 0 });
+      const g = grupos[nome] || (grupos[nome] = { nome, sessoes: 0, plays: 0, pitch: 0, terminaram: 0, cliques: 0, cliques_pitch: 0 });
       g.sessoes += 1;
       g.plays += s.com_som ? 1 : 0;
       g.pitch += chegou(s) ? 1 : 0;
       g.terminaram += s.com_som && s.terminou ? 1 : 0;
       g.cliques += s.clicou;
+      g.cliques_pitch += chegou(s) ? s.clicou : 0;
     }
     let lista = Object.values(grupos).sort((a, b) => b.sessoes - a.sessoes || (a.nome < b.nome ? -1 : a.nome > b.nome ? 1 : 0));
     if (limite && lista.length > limite) {
-      const resto = { nome: 'outras', sessoes: 0, plays: 0, pitch: 0, terminaram: 0, cliques: 0 };
+      const resto = { nome: 'outras', sessoes: 0, plays: 0, pitch: 0, terminaram: 0, cliques: 0, cliques_pitch: 0 };
       for (const g of lista.slice(limite)) for (const k of CHAVES_GRUPO) resto[k] += g[k];
       lista = lista.slice(0, limite).concat([resto]);
     }
@@ -507,10 +513,11 @@ export async function resumo(db, { player = null, de = null, ate = null, pitch =
     terminaram: terminaram.length,
     taxa_conclusao: plays.length ? arredondar(terminaram.length / plays.length, 4) : 0,
     cliques,
-    taxa_clique: chegaramPitch.length ? arredondar(cliques / chegaramPitch.length, 4) : 0,
+    cliques_pitch: cliquesPitch,
+    taxa_clique: chegaramPitch.length ? arredondar(cliquesPitch / chegaramPitch.length, 4) : 0,
     erros,
     taxa_erro: linhas.length ? arredondar(erros / linhas.length, 4) : 0,
-    funil: { visitas: linhas.length, plays: plays.length, pitch: chegaramPitch.length, cliques },
+    funil: { visitas: linhas.length, plays: plays.length, pitch: chegaramPitch.length, cliques: cliquesPitch },
     amostra: { plays: plays.length, pequena: plays.length < PLAYS_POUCOS },
     tempo_medio: arredondar(media(tempos), 1),
     tempo_mediano: arredondar(mediana(tempos), 1),

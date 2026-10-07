@@ -250,18 +250,20 @@ def test_resumo_cliques_erros_funil_amostra_e_tabelas_novas():
     banco.registrar(envio("d", visitor="vis-4", url=url("video-2", "remarketing"), unmuted=False, events=[]), "")
     r = banco.resumo()
     assert (r["sessoes"], r["plays"], r["chegaram_pitch"]) == (4, 2, 1)
-    assert r["cliques"] == 2 and r["taxa_clique"] == 2      # cliques ÷ chegaram ao pitch (2 ÷ 1)
+    assert r["cliques"] == 2                                 # toda sessão com cta_click, inclusive a muda
+    assert r["cliques_pitch"] == 1 and r["taxa_clique"] == 1  # cliques de quem chegou ao pitch ÷ chegaram ao pitch (1 ÷ 1)
     assert r["erros"] == 1 and r["taxa_erro"] == 0.25
-    assert r["funil"] == {"visitas": 4, "plays": 2, "pitch": 1, "cliques": 2}
+    assert r["funil"] == {"visitas": 4, "plays": 2, "pitch": 1, "cliques": 1}  # funil decrescente: só cliques de quem chegou ao pitch
     assert r["amostra"] == {"plays": 2, "pequena": True}
     assert r["curva_amostrada"] is False and r["curva_n"] == 2 and r["navegador"] is None
     nav = {g["nome"]: g for g in r["navegadores"]}
     assert sorted(nav) == ["Chrome", "Instagram", "Outro", "Safari"]
-    assert nav["Instagram"] == {"nome": "Instagram", "sessoes": 1, "plays": 1, "pitch": 1, "terminaram": 0, "cliques": 1}
-    assert nav["Safari"] == {"nome": "Safari", "sessoes": 1, "plays": 0, "pitch": 0, "terminaram": 0, "cliques": 1}
-    assert nav["Chrome"] == {"nome": "Chrome", "sessoes": 1, "plays": 1, "pitch": 0, "terminaram": 0, "cliques": 0}
+    assert nav["Instagram"] == {"nome": "Instagram", "sessoes": 1, "plays": 1, "pitch": 1, "terminaram": 0, "cliques": 1,
+                                "cliques_pitch": 1}
+    assert nav["Safari"] == {"nome": "Safari", "sessoes": 1, "plays": 0, "pitch": 0, "terminaram": 0, "cliques": 1, "cliques_pitch": 0}
+    assert nav["Chrome"] == {"nome": "Chrome", "sessoes": 1, "plays": 1, "pitch": 0, "terminaram": 0, "cliques": 0, "cliques_pitch": 0}
     cri = {g["nome"]: g for g in r["criativos"]}
-    assert cri["video-1"] == {"nome": "video-1", "sessoes": 2, "plays": 2, "pitch": 1, "terminaram": 0, "cliques": 1}
+    assert cri["video-1"] == {"nome": "video-1", "sessoes": 2, "plays": 2, "pitch": 1, "terminaram": 0, "cliques": 1, "cliques_pitch": 1}
     assert cri["video-2"]["sessoes"] == 1 and cri["(sem utm_content)"]["sessoes"] == 1 and cri["(sem utm_content)"]["cliques"] == 1
     cam = {g["nome"]: g for g in r["campanhas"]}
     assert cam["lancamento"]["sessoes"] == 2 and cam["remarketing"]["sessoes"] == 1 and cam["(sem utm_campaign)"]["cliques"] == 1
@@ -271,13 +273,36 @@ def test_resumo_cliques_erros_funil_amostra_e_tabelas_novas():
     assert disp["celular"]["cliques"] == 2 and disp["computador"]["cliques"] == 0
     # sem sessões: tudo zero, sem divisão por zero
     vazio = banco.resumo("inexistente")
-    assert (vazio["cliques"], vazio["taxa_clique"], vazio["erros"], vazio["taxa_erro"], vazio["curva_n"]) == (0, 0, 0, 0, 0)
+    assert (vazio["cliques"], vazio["cliques_pitch"], vazio["taxa_clique"], vazio["erros"], vazio["taxa_erro"],
+            vazio["curva_n"]) == (0, 0, 0, 0, 0, 0)
     assert vazio["funil"] == {"visitas": 0, "plays": 0, "pitch": 0, "cliques": 0} and vazio["navegadores"] == []
     # 30 plays deixam de ser amostra pequena
     banco2 = servidor.Banco()
     for i in range(servidor.PLAYS_POUCOS):
         banco2.registrar(envio(f"s{i}"))
     assert banco2.resumo()["amostra"]["pequena"] is False
+
+
+def test_taxa_clique_nao_passa_de_100_e_funil_decrescente():
+    """Cliques de quem não chegou ao pitch (sessão muda na tela final, botão antes do pitch) ficam só em `cliques`."""
+    banco = servidor.Banco()
+    for i in range(32):  # plays sem pitch
+        banco.registrar(envio(f"p{i}", maxTime=10, watched=[[0, 9]]), UA["safari_ios"])
+    banco.registrar(envio("pitch-clicou", events=[{"type": "unmute", "ts": 1}, {"type": "cta_click", "ts": 2, "where": "end"}]),
+                    UA["safari_ios"])
+    for i in range(2):  # autoplay mudo foi até o fim e a pessoa clicou no botão da tela final (nunca liberou o som)
+        banco.registrar(envio(f"muda{i}", unmuted=False, maxTime=0, watched=[],
+                              events=[{"type": "cta_click", "ts": 1, "where": "end"}]), UA["safari_ios"])
+    # com som, clicou num botão liberado por tempo antes de chegar ao pitch
+    banco.registrar(envio("cedo", maxTime=20, watched=[[0, 19]], events=[{"type": "unmute", "ts": 1}, {"type": "cta_click", "ts": 2}]),
+                    UA["chrome"])
+    r = banco.resumo()
+    assert (r["plays"], r["chegaram_pitch"], r["cliques"], r["cliques_pitch"], r["taxa_clique"]) == (34, 1, 4, 1, 1)
+    assert r["funil"] == {"visitas": 36, "plays": 34, "pitch": 1, "cliques": 1}
+    assert r["funil"]["cliques"] <= r["funil"]["pitch"] <= r["funil"]["plays"] <= r["funil"]["visitas"]
+    safari = next(g for g in r["navegadores"] if g["nome"] == "Safari")
+    assert (safari["pitch"], safari["cliques"], safari["cliques_pitch"]) == (1, 3, 1)
+    assert r["criativos"][0]["cliques_pitch"] == 1 and r["campanhas"][0]["cliques"] == 4 and r["origens"][0]["cliques_pitch"] == 1
 
 
 def test_criativos_e_campanhas_ate_12_mais_outras():
@@ -501,8 +526,8 @@ def test_api_filtro_navegador_validado_e_aplicado(pedir):
     status, _, dados = pedir("GET", "/api/resumo?navegador=Instagram", None, cab)
     r = json.loads(dados)
     assert status == 200 and r["sessoes"] == 1 and r["navegador"] == "Instagram" and r["navegadores"][0]["nome"] == "Instagram"
-    for campo in ("cliques", "taxa_clique", "erros", "taxa_erro", "funil", "amostra", "curva_amostrada", "curva_n",
-                  "navegadores", "criativos", "campanhas"):
+    for campo in ("cliques", "cliques_pitch", "taxa_clique", "erros", "taxa_erro", "funil", "amostra", "curva_amostrada",
+                  "curva_n", "navegadores", "criativos", "campanhas"):
         assert campo in r, campo
     status, _, csv = pedir("GET", "/api/sessoes.csv?navegador=Chrome%20WebView", None, cab)
     linhas = csv.decode("utf-8-sig").splitlines()

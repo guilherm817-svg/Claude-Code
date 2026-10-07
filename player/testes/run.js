@@ -65,11 +65,16 @@ function check(cond, msg, extra) {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // Servidor estático mínimo para a pasta player/, com suporte a Range (o <video> precisa) e alguns
 // vídeos "difíceis": quebrado.webm (404 até ctl.quebrado virar false), lento.webm (demora ctl.delayVideoMs
-// para responder) e preso.webm (não responde enquanto ctl.preso; soltar() libera).
+// para responder, ou chega a ctl.lentoKBs KB/s com Range, como uma CDN numa rede lenta) e preso.webm (não responde
+// enquanto ctl.preso; soltar() libera; derrubar() corta as respostas em andamento). Com ctl.semRange o servidor
+// ignora o Range e manda o arquivo inteiro (como um servidor simples ou um cache frio): aí o load() de uma
+// retentativa volta à rede em vez de usar o que o Chromium já tinha.
 const TIPOS = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.webm': 'video/webm', '.mp4': 'video/mp4', '.png': 'image/png', '.jpg': 'image/jpeg' };
-const ctl = { quebrado: true, pedidosQuebrado: 0, delayVideoMs: 0, preso: false };
+const ctl = { quebrado: true, pedidosQuebrado: 0, delayVideoMs: 0, preso: false, semRange: false, lentoKBs: 0, ativos: new Set() };
 const presos = [];
 function soltar() { while (presos.length) presos.shift()(); }
+// A rede caiu: derruba as respostas em andamento e prende as próximas (soltar() libera).
+function derrubar() { ctl.preso = true; ctl.ativos.forEach((r) => r.destroy()); ctl.ativos.clear(); }
 function servidor() {
   return new Promise((resolve) => {
     const srv = http.createServer((req, res) => {
@@ -85,19 +90,33 @@ function servidor() {
       const tamanho = fs.statSync(alvo).size;
       const tipo = TIPOS[path.extname(alvo)] || 'application/octet-stream';
       const enviar = () => {
-        const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range || '');
+        const range = ctl.semRange ? null : /^bytes=(\d*)-(\d*)$/.exec(req.headers.range || '');
         if (range) {
           const inicio = range[1] ? parseInt(range[1], 10) : Math.max(0, tamanho - parseInt(range[2], 10));
           const fim = range[1] && range[2] ? Math.min(parseInt(range[2], 10), tamanho - 1) : tamanho - 1;
+          if (nome === 'lento.webm' && ctl.lentoKBs) {
+            // Range, mas devagar (e sem cache): o Chromium fica com o buffer perto do playhead, e o load() de uma
+            // retentativa precisa voltar à rede para a posição guardada.
+            res.writeHead(206, { 'Content-Type': tipo, 'Accept-Ranges': 'bytes', 'Content-Range': `bytes ${inicio}-${fim}/${tamanho}`, 'Content-Length': fim - inicio + 1, 'Cache-Control': 'no-store' });
+            ctl.ativos.add(res); res.on('close', () => ctl.ativos.delete(res));
+            const fd = fs.openSync(alvo, 'r'); let pos = inicio; const passo = 16384;
+            const tick = () => {
+              if (res.destroyed || pos > fim) { fs.closeSync(fd); if (!res.destroyed) res.end(); return; }
+              const n = Math.min(passo, fim - pos + 1); const buf = Buffer.alloc(n); fs.readSync(fd, buf, 0, n, pos); pos += n; res.write(buf);
+              setTimeout(tick, ctl.lentoKBs ? passo / (ctl.lentoKBs * 1024) * 1000 : 0);
+            };
+            tick();
+            return;
+          }
           res.writeHead(206, { 'Content-Type': tipo, 'Accept-Ranges': 'bytes', 'Content-Range': `bytes ${inicio}-${fim}/${tamanho}`, 'Content-Length': fim - inicio + 1 });
           fs.createReadStream(alvo, { start: inicio, end: fim }).pipe(res);
           return;
         }
-        res.writeHead(200, { 'Content-Type': tipo, 'Accept-Ranges': 'bytes', 'Content-Length': tamanho, 'Cache-Control': 'no-store' });
+        res.writeHead(200, Object.assign({ 'Content-Type': tipo, 'Content-Length': tamanho, 'Cache-Control': 'no-store' }, ctl.semRange ? {} : { 'Accept-Ranges': 'bytes' }));
         fs.createReadStream(alvo).pipe(res);
       };
       if (nome === 'lento.webm' && ctl.delayVideoMs) setTimeout(enviar, ctl.delayVideoMs);
-      else if (nome === 'preso.webm' && ctl.preso) presos.push(enviar);
+      else if ((nome === 'preso.webm' || nome === 'lento.webm') && ctl.preso) presos.push(enviar);
       else enviar();
     });
     srv.listen(PORT, '127.0.0.1', () => resolve(srv));
@@ -719,6 +738,195 @@ const CANTO = { position: { x: 12, y: 12 } }; // clique longe do CTA (que fica n
     check((await state(page)) === 'loading', 'toque em qualquer ponto da tela de erro tenta de novo (volta para loading)', await state(page));
     check((await page.evaluate(() => document.querySelectorAll('script[data-vsl-hls]').length)) >= 4, 'cada tentativa injeta o script de novo', await page.evaluate(() => document.querySelectorAll('script[data-vsl-hls]').length));
     await ctx15.close();
+
+    // ---------------------------------------------------------------- S. erro no meio de uma sessão com som
+    console.log('\nS. Erro com som: a retentativa não apaga a posição; rede presa -> "toque para continuar" retoma de onde parou; 404 -> :pos sobrevive');
+    // Tudo que o player guarda sobre a posição, lido de uma vez: <video>, _lastTime, seek pendente/recusado e localStorage.
+    const guardado = (page) => player(page, '({ time: +player.video.currentTime.toFixed(2), lastTime: +player._lastTime.toFixed(2), pendingSeek: player._pendingSeek, seekRetry: player._seekRetry, pos: localStorage.getItem("vsl:vsl-teste:pos") })');
+    // As amostras são tiradas 300 ms depois de `playing`: um vídeo que recomeça do zero ainda está perto de 0 aí, então o
+    // teste não passa "sozinho" quando a retomada falha (esperar `currentTime >= 3,5` em até 10 s passaria em 3,5 s).
+    //
+    // S1. Servidor SEM Range (Safari, cache frio): o load() da retentativa volta à rede. Limitação do Chromium: num stream
+    // sem Range `seekable` é [0,0] durante todo o download (mesmo com `buffered` cobrindo o alvo) e o seek para a posição
+    // guardada é recusado: o quadro recomeça do zero. O que o player garante é NÃO PERDER a posição: _lastTime fica no
+    // alvo, :pos não cai abaixo dele e o alvo fica armado (_seekRetry) para quando `seekable` cobrir. A retomada de
+    // verdade é provada em S2 (Range + download lento) e S3 (404 -> "Tentar de novo" com Range).
+    const ctx16 = await browser.newContext({ viewport });
+    page = await ctx16.newPage();
+    vigiar(page, { recursos: false });
+    ctl.semRange = true;
+    ctl.preso = false;
+    await page.goto(pagina('retry-som', { src: 'preso.webm' }));
+    await waitState(page, 'autoplaying');
+    await page.click('#vsl-teste', CANTO); // som (recomeça do zero)
+    await waitState(page, 'playing');
+    await waitTime(page, 4);
+    const posS = await page.evaluate(() => parseFloat(localStorage.getItem('vsl:vsl-teste:pos')));
+    check(posS >= 3, 'posição salva antes do erro', posS);
+    ctl.preso = true; // a rede caiu: o pedido do vídeo não responde
+    await vid(page, "v.dispatchEvent(new Event('error'))");
+    await sleep(1500); // a 1ª retentativa (1 s) já fez load(); o pedido novo está preso
+    const amostraS = await amostra(page);
+    const guardadoS = await guardado(page);
+    check(amostraS.state === 'loading' && amostraS.time === 0, 'retentativa: load() zerou o <video> e o estado é loading', amostraS);
+    check(guardadoS.lastTime >= 3.5 && guardadoS.pendingSeek >= 3.5, 'o timeupdate em 0 do load() não apaga _lastTime; a posição vira seek pendente', guardadoS);
+    check(parseFloat(guardadoS.pos) >= 3, 'localStorage :pos não vira 0 na retentativa', guardadoS.pos);
+    await waitState(page, 'paused', 16000);
+    check(true, 'sem imagem em 12 s numa sessão com som: vai para paused ("toque para continuar"), não para a capa');
+    check(!(await eventos(page)).includes('autoplay_blocked'), 'sem evento autoplay_blocked numa sessão com som');
+    check(parseFloat(await page.evaluate(() => localStorage.getItem('vsl:vsl-teste:pos'))) >= 3, ':pos continua guardado depois do watchdog');
+    ctl.preso = false;
+    soltar(); // a rede voltou; sem Range, o Chromium recusa o seek pendente (cai em 0)
+    await sleep(1500);
+    const voltouS = await guardado(page);
+    check(voltouS.lastTime >= 3.5 && (voltouS.time >= 3.5 || voltouS.seekRetry >= 3.5), 'rede de volta, ainda pausado: o seek recusado não apaga _lastTime (alvo armado em _seekRetry)', voltouS);
+    await page.click('#vsl-teste', CANTO);
+    await waitState(page, 'playing', 10000);
+    await sleep(300);
+    const logoS = await guardado(page);
+    check(logoS.lastTime >= 3.5 && parseFloat(logoS.pos) >= 3, 'sem Range: logo depois do toque _lastTime e :pos continuam na posição de antes do erro (o quadro pode recomeçar do zero: limitação do navegador)', logoS);
+    await sleep(2000);
+    const depoisS = await guardado(page);
+    check(depoisS.lastTime >= 3.5 && parseFloat(depoisS.pos) >= 3, 'sem Range: 2 s de reprodução depois, :pos não é sobrescrito com o tempo "regenerado"', depoisS);
+    check(await vid(page, 'v.muted') === false, 'retomada com som');
+    check(!(await eventos(page)).includes('resume_prompt'), 'sem pergunta "continuar de onde parou" no meio da sessão');
+    await ctx16.close();
+    ctl.semRange = false;
+    // S2. Servidor COM Range (CDN) numa rede lenta (90 KB/s): a queda derruba a conexão, o buffer do Chromium esgota e o
+    // load() da retentativa precisa da rede para a posição guardada. Aqui a retomada tem de ser real: o <video> volta
+    // para a posição de antes do erro logo depois de `playing`.
+    const ctx16b = await browser.newContext({ viewport });
+    page = await ctx16b.newPage();
+    vigiar(page, { recursos: false });
+    ctl.lentoKBs = 90;
+    ctl.preso = false;
+    await page.goto(pagina('retry-lento', { src: 'lento.webm' }), { waitUntil: 'domcontentloaded' });
+    await waitState(page, 'autoplaying', 15000);
+    await page.click('#vsl-teste', CANTO);
+    await waitState(page, 'playing');
+    await waitTime(page, 4, 20000);
+    derrubar(); // a rede caiu: conexão cortada, pedidos seguintes presos
+    await page.waitForFunction(() => { const r = document.getElementById('vsl-teste'); const v = r.querySelector('video'); return r.classList.contains('vsl-buffering') || v.readyState < 3; }, null, { timeout: 25000 }); // o buffer esgotou
+    const antesS2 = await guardado(page);
+    await vid(page, "v.dispatchEvent(new Event('error'))"); // o que o Chromium faria (MEDIA_ERR_NETWORK) depois das próprias tentativas
+    await waitState(page, 'paused', 16000); // retentativa presa -> watchdog -> "toque para continuar"
+    const pausadoS2 = await guardado(page);
+    check(pausadoS2.lastTime >= antesS2.time - 0.5 && parseFloat(pausadoS2.pos) >= 3, 'com Range: watchdog -> paused com a posição guardada', { antes: antesS2, pausado: pausadoS2 });
+    ctl.preso = false;
+    ctl.lentoKBs = 0;
+    soltar(); // a rede voltou
+    await page.click('#vsl-teste', CANTO);
+    await waitState(page, 'playing', 10000);
+    await sleep(300);
+    const logoS2 = await guardado(page);
+    check(logoS2.time >= 3.5 && logoS2.time >= antesS2.time - 1, 'com Range: logo depois do toque o <video> está na posição de antes do erro (retomada de verdade, não do zero)', { antes: antesS2.time, depois: logoS2 });
+    check(await vid(page, 'v.muted') === false, 'retomada com som');
+    check(!(await eventos(page)).includes('resume_prompt'), 'sem pergunta "continuar de onde parou" no meio da sessão');
+    await ctx16b.close();
+    // S3/S4. 404 nas três retentativas -> error -> "Tentar de novo": com Range na volta (S3) a retomada é real; sem Range
+    // (S4) o Chromium recusa o seek, mas _lastTime/:pos não se perdem e, ao recarregar, o player ainda oferece continuar.
+    for (const comRange of [true, false]) {
+      const rotulo = comRange ? 'com Range' : 'sem Range';
+      ctl.semRange = true; // o primeiro play não pode ficar no cache do Chromium (senão o load() nem vai à rede)
+      ctl.quebrado = false;
+      const ctx17 = await browser.newContext({ viewport });
+      page = await ctx17.newPage();
+      vigiar(page, { recursos: false });
+      await page.goto(pagina('retry-404', { src: 'quebrado.webm' }));
+      await waitState(page, 'autoplaying');
+      await page.click('#vsl-teste', CANTO);
+      await waitState(page, 'playing');
+      await waitTime(page, 4);
+      ctl.quebrado = true;
+      await vid(page, "v.dispatchEvent(new Event('error'))");
+      await waitState(page, 'error', 20000);
+      const guardado404 = await guardado(page);
+      check(guardado404.lastTime >= 3.5 && parseFloat(guardado404.pos) >= 3, `três retentativas em 404 (${rotulo}): _lastTime e :pos preservados no estado error`, guardado404);
+      ctl.quebrado = false;
+      ctl.semRange = !comRange;
+      await page.click('#vsl-teste [data-vsl-action="retry"]');
+      await waitState(page, 'playing', 10000);
+      await sleep(300);
+      const logo404 = await guardado(page);
+      if (comRange) check(logo404.time >= 3.5, '"Tentar de novo" com Range: logo depois de playing o <video> está na posição de antes do erro (não do zero)', logo404);
+      else check(logo404.lastTime >= 3.5 && parseFloat(logo404.pos) >= 3 && (logo404.time >= 3.5 || logo404.seekRetry >= 3.5), '"Tentar de novo" sem Range: o seek recusado não apaga _lastTime/:pos (alvo armado)', logo404);
+      await sleep(2000);
+      const depois404 = await guardado(page);
+      check(depois404.lastTime >= 3.5 && parseFloat(depois404.pos) >= 3, `2 s depois (${rotulo}): :pos continua na posição de antes do erro`, depois404);
+      check(await vid(page, 'v.muted') === false, 'com som (a sessão já tinha liberado o som)');
+      await page.click('#vsl-teste', CANTO); // pausa: grava a posição
+      await waitState(page, 'paused');
+      const posPausa = parseFloat(await page.evaluate(() => localStorage.getItem('vsl:vsl-teste:pos')));
+      check(posPausa >= 3.5, `a pausa grava a posição de verdade, não a "regenerada" (${rotulo})`, posPausa);
+      await page.goto(pagina('retry-404', { src: 'quebrado.webm' }));
+      await waitState(page, 'autoplaying');
+      await page.click('#vsl-teste', CANTO);
+      await waitState(page, 'modal');
+      const textoModal = await page.textContent('#vsl-teste .vsl-card p');
+      check(/0:0[4-9]/.test(textoModal), `ao recarregar, o player ainda oferece "continuar de onde parou" com a posição certa (${rotulo})`, textoModal);
+      await ctx17.close();
+    }
+    ctl.semRange = false;
+
+    // ---------------------------------------------------------------- T. erro com o visitante pausado ou no modal
+    console.log('\nT. Erro do <video> com o visitante pausado ou no "continuar de onde parou?": a retentativa não retoma sozinha');
+    // Pausado DEPOIS do pitch com miniatura de pausa + CTA: a miniatura (mecânica de venda) tem de sobreviver à retentativa,
+    // com Range (o seek pendente devolve a posição) e sem Range (o Chromium recusa o seek; vale a posição guardada).
+    const posterT = (page) => page.evaluate(() => { const r = document.getElementById('vsl-teste'); return { attr: r.getAttribute('data-pause-poster'), poster: getComputedStyle(r.querySelector('.vsl-pause-poster')).opacity, pausada: getComputedStyle(r.querySelector('.vsl-paused')).opacity }; });
+    for (const comRange of [true, false]) {
+      const rotulo = comRange ? 'com Range' : 'sem Range';
+      ctl.semRange = !comRange;
+      const ctx18 = await browser.newContext({ viewport });
+      page = await ctx18.newPage();
+      vigiar(page);
+      await page.goto(pagina('erro-pausado', { pitch: '2', attrs: 'data-pause-poster-late="../demo/capa.jpg" data-pause-cta-text="QUERO A OFERTA" data-pause-cta-link="#oferta"' }));
+      await waitState(page, 'autoplaying');
+      await page.click('#vsl-teste', CANTO);
+      await waitState(page, 'playing');
+      await waitTime(page, 3);
+      await page.click('#vsl-teste', CANTO);
+      await waitState(page, 'paused');
+      await sleep(400);
+      const antesPT = await posterT(page);
+      check(antesPT.attr === 'on' && antesPT.poster === '1' && antesPT.pausada === '0', `pausado depois do pitch (${rotulo}): miniatura de pausa com o botão na tela`, antesPT);
+      const playsAntesT = (await eventos(page)).filter((n) => n === 'play').length;
+      await vid(page, "v.dispatchEvent(new Event('error'))");
+      await sleep(3000); // 1 s até a retentativa, mais a recarga da fonte
+      const amostraT = await amostra(page);
+      check(amostraT.state === 'paused' && amostraT.paused === true, `depois da retentativa continua pausado, não volta a tocar sozinho (${rotulo})`, amostraT);
+      const depoisPT = await posterT(page);
+      check(depoisPT.attr === 'on' && depoisPT.poster === '1' && depoisPT.pausada === '0', `depois da retentativa a miniatura de pausa com o botão continua na tela (${rotulo})`, Object.assign(depoisPT, { time: amostraT.time, lastTime: await player(page, 'player._lastTime') }));
+      check((await eventos(page)).filter((n) => n === 'play').length === playsAntesT, 'nenhum evento play sem toque');
+      check(await vid(page, 'v.muted') === false, 'o som liberado é mantido');
+      await page.click('#vsl-teste', CANTO);
+      await waitState(page, 'playing');
+      await sleep(300); // amostra imediata: um vídeo que recomeça do zero ainda não chegou a 2,5 s
+      const logoT = await player(page, '({ time: +player.video.currentTime.toFixed(2), lastTime: +player._lastTime.toFixed(2), seekRetry: player._seekRetry })');
+      if (comRange) check(logoT.time >= 2.5, 'o toque retoma de onde tinha pausado (~3 s), não do zero', logoT);
+      else check(logoT.lastTime >= 2.5 && (logoT.time >= 2.5 || logoT.seekRetry >= 2.5), 'sem Range: o seek recusado não apaga a posição guardada (~3 s)', logoT);
+      check((await page.getAttribute('#vsl-teste', 'data-pause-poster')) === null, 'ao retomar, a miniatura some');
+      await ctx18.close();
+    }
+    ctl.semRange = false;
+    // no modal: 12 s salvos, erro com a pergunta aberta -> a pergunta volta e "Continuar" retoma dos 12 s
+    const ctx19 = await browser.newContext({ viewport });
+    await ctx19.addInitScript(() => { localStorage.setItem('vsl:vsl-teste:pos', '12'); localStorage.setItem('vsl:vsl-teste:reached', '12'); });
+    page = await ctx19.newPage();
+    vigiar(page);
+    await page.goto(pagina('erro-modal'));
+    await waitState(page, 'autoplaying');
+    await page.click('#vsl-teste', CANTO);
+    await waitState(page, 'modal');
+    await vid(page, "v.dispatchEvent(new Event('error'))");
+    await sleep(2500);
+    check((await state(page)) === 'modal' && (await page.isVisible('#vsl-teste .vsl-card')), 'depois da retentativa a pergunta "continuar de onde parou?" continua na tela', await state(page));
+    check(await vid(page, 'v.paused'), 'o vídeo segue pausado enquanto a pergunta está aberta');
+    await page.click('#vsl-teste [data-vsl-action="continue"]');
+    await waitState(page, 'playing');
+    await page.waitForFunction(() => document.getElementById('vsl-teste').querySelector('video').currentTime >= 11, null, { timeout: 8000 })
+      .then(() => check(true, '"Continuar" retoma dos 12 s salvos'), async () => check(false, '"Continuar" retoma dos 12 s salvos', await amostra(page)));
+    check(await vid(page, 'v.muted') === false, 'com som');
+    await ctx19.close();
 
     await browser.close();
   } catch (e) {

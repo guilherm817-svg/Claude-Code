@@ -259,19 +259,20 @@ test('resumo: cliques, erros, funil, amostra pequena e tabelas por navegador, cr
   await registrar(db, envio('d', { visitor: 'vis-4', url: url('video-2', 'remarketing'), unmuted: false, events: [] }), '');
   const r = await resumo(db);
   assert.deepEqual([r.sessoes, r.plays, r.chegaram_pitch], [4, 2, 1]);
-  assert.equal(r.cliques, 2); assert.equal(r.taxa_clique, 2, 'cliques ÷ chegaram ao pitch (2 ÷ 1)');
+  assert.equal(r.cliques, 2, 'cliques: toda sessão com cta_click, inclusive a muda');
+  assert.equal(r.cliques_pitch, 1); assert.equal(r.taxa_clique, 1, 'cliques de quem chegou ao pitch ÷ chegaram ao pitch (1 ÷ 1); o clique da sessão muda fica fora');
   assert.equal(r.erros, 1); assert.equal(r.taxa_erro, 0.25);
-  assert.deepEqual(r.funil, { visitas: 4, plays: 2, pitch: 1, cliques: 2 });
+  assert.deepEqual(r.funil, { visitas: 4, plays: 2, pitch: 1, cliques: 1 }, 'o funil é decrescente: só cliques de quem chegou ao pitch');
   assert.deepEqual(r.amostra, { plays: 2, pequena: true });
   assert.equal(r.curva_amostrada, false); assert.equal(r.curva_n, 2); assert.equal(r.navegador, null);
   const porNome = (lista) => Object.fromEntries(lista.map((g) => [g.nome, g]));
   const nav = porNome(r.navegadores);
   assert.deepEqual(Object.keys(nav).sort(), ['Chrome', 'Instagram', 'Outro', 'Safari']);
-  assert.deepEqual(nav.Instagram, { nome: 'Instagram', sessoes: 1, plays: 1, pitch: 1, terminaram: 0, cliques: 1 });
-  assert.deepEqual(nav.Safari, { nome: 'Safari', sessoes: 1, plays: 0, pitch: 0, terminaram: 0, cliques: 1 });
-  assert.deepEqual(nav.Chrome, { nome: 'Chrome', sessoes: 1, plays: 1, pitch: 0, terminaram: 0, cliques: 0 });
+  assert.deepEqual(nav.Instagram, { nome: 'Instagram', sessoes: 1, plays: 1, pitch: 1, terminaram: 0, cliques: 1, cliques_pitch: 1 });
+  assert.deepEqual(nav.Safari, { nome: 'Safari', sessoes: 1, plays: 0, pitch: 0, terminaram: 0, cliques: 1, cliques_pitch: 0 });
+  assert.deepEqual(nav.Chrome, { nome: 'Chrome', sessoes: 1, plays: 1, pitch: 0, terminaram: 0, cliques: 0, cliques_pitch: 0 });
   const cri = porNome(r.criativos);
-  assert.deepEqual(cri['video-1'], { nome: 'video-1', sessoes: 2, plays: 2, pitch: 1, terminaram: 0, cliques: 1 });
+  assert.deepEqual(cri['video-1'], { nome: 'video-1', sessoes: 2, plays: 2, pitch: 1, terminaram: 0, cliques: 1, cliques_pitch: 1 });
   assert.equal(cri['video-2'].sessoes, 1); assert.equal(cri['(sem utm_content)'].sessoes, 1); assert.equal(cri['(sem utm_content)'].cliques, 1);
   const cam = porNome(r.campanhas);
   assert.equal(cam.lancamento.sessoes, 2); assert.equal(cam.remarketing.sessoes, 1); assert.equal(cam['(sem utm_campaign)'].cliques, 1);
@@ -279,12 +280,29 @@ test('resumo: cliques, erros, funil, amostra pequena e tabelas por navegador, cr
   assert.equal(porNome(r.dispositivos).celular.cliques, 2); assert.equal(porNome(r.dispositivos).computador.cliques, 0);
   // sem sessões: tudo zero, sem divisão por zero
   const vazio = await resumo(db, { player: 'inexistente' });
-  assert.deepEqual([vazio.cliques, vazio.taxa_clique, vazio.erros, vazio.taxa_erro, vazio.curva_n], [0, 0, 0, 0, 0]);
+  assert.deepEqual([vazio.cliques, vazio.cliques_pitch, vazio.taxa_clique, vazio.erros, vazio.taxa_erro, vazio.curva_n], [0, 0, 0, 0, 0, 0]);
   assert.deepEqual(vazio.funil, { visitas: 0, plays: 0, pitch: 0, cliques: 0 }); assert.deepEqual(vazio.navegadores, []);
   // 30 plays deixam de ser amostra pequena
   const db2 = criarD1();
   for (let i = 0; i < PLAYS_POUCOS; i++) await registrar(db2, envio('s' + i));
   assert.equal((await resumo(db2)).amostra.pequena, false);
+});
+
+test('taxa_clique nunca passa de 100 % e o funil é decrescente: cliques de quem não chegou ao pitch ficam só em `cliques`', async () => {
+  const db = criarD1();
+  for (let i = 0; i < 32; i++) await registrar(db, envio('p' + i, { maxTime: 10, watched: [[0, 9]] }), UA.safariIos); // plays sem pitch
+  await registrar(db, envio('pitch-clicou', { events: [{ type: 'unmute' }, { type: 'cta_click', where: 'end' }] }), UA.safariIos);
+  // autoplay mudo foi até o fim e a pessoa clicou no botão da tela final (nunca liberou o som)
+  for (let i = 0; i < 2; i++) await registrar(db, envio('muda' + i, { unmuted: false, maxTime: 0, watched: [], events: [{ type: 'cta_click', where: 'end' }] }), UA.safariIos);
+  // com som, clicou num botão liberado por tempo antes de chegar ao pitch
+  await registrar(db, envio('cedo', { maxTime: 20, watched: [[0, 19]], events: [{ type: 'unmute' }, { type: 'cta_click' }] }), UA.chrome);
+  const r = await resumo(db);
+  assert.deepEqual([r.plays, r.chegaram_pitch, r.cliques, r.cliques_pitch, r.taxa_clique], [34, 1, 4, 1, 1]);
+  assert.deepEqual(r.funil, { visitas: 36, plays: 34, pitch: 1, cliques: 1 });
+  assert.ok(r.funil.cliques <= r.funil.pitch && r.funil.pitch <= r.funil.plays && r.funil.plays <= r.funil.visitas, 'funil decrescente');
+  const safari = r.navegadores.find((g) => g.nome === 'Safari');
+  assert.deepEqual([safari.pitch, safari.cliques, safari.cliques_pitch], [1, 3, 1]);
+  assert.equal(r.criativos[0].cliques_pitch, 1); assert.equal(r.campanhas[0].cliques, 4); assert.equal(r.origens[0].cliques_pitch, 1);
 });
 
 test('criativos e campanhas: até 12 e o resto em "outras"', async () => {
@@ -527,7 +545,7 @@ test('API: navegador= validado (até 40 caracteres), aplicado no resumo e no CSV
   let r = await pedir('GET', '/api/resumo?navegador=Instagram', null, cab);
   const j = await r.json();
   assert.equal(r.status, 200); assert.equal(j.sessoes, 1); assert.equal(j.navegador, 'Instagram'); assert.equal(j.navegadores[0].nome, 'Instagram');
-  for (const campo of ['cliques', 'taxa_clique', 'erros', 'taxa_erro', 'funil', 'amostra', 'curva_amostrada', 'curva_n', 'navegadores', 'criativos', 'campanhas']) {
+  for (const campo of ['cliques', 'cliques_pitch', 'taxa_clique', 'erros', 'taxa_erro', 'funil', 'amostra', 'curva_amostrada', 'curva_n', 'navegadores', 'criativos', 'campanhas']) {
     assert.ok(campo in j, campo);
   }
   r = await pedir('GET', '/api/sessoes.csv?navegador=Chrome%20WebView', null, cab);

@@ -46,7 +46,8 @@ define o fuso das datas.
 cd player/analytics/cloudflare
 npm install
 npx wrangler login
-npm run deploy          # cria o banco, roda a migração e publica
+npx wrangler d1 create vsl-analytics   # só na primeira vez: cria o banco (o deploy o encontra pelo nome)
+npm run deploy                         # roda as migrações no banco e só então publica o Worker
 npx wrangler secret put TOKEN
 ```
 
@@ -58,15 +59,16 @@ As migrações ficam em `migrations/` e o Worker as roda sozinho no primeiro ace
 banco funciona mesmo sem `wrangler d1 migrations apply`. A `0003_navegador.sql` acrescenta a coluna
 `navegador` à tabela `sessoes` (`ALTER TABLE`); o Worker confere antes se a coluna já existe (`PRAGMA
 table_info`) e ignora o erro de coluna duplicada, por isso rodar de novo não quebra. Já a `wrangler d1
-migrations apply` não tolera o `ALTER` repetido: se o Worker novo receber um acesso antes dela, ela falha com
-`duplicate column name: navegador`. Nesse caso a coluna já está lá; basta marcar a migração como aplicada:
+migrations apply` não tolera o `ALTER` repetido. Por isso o `npm run deploy` aplica as migrações **antes** de
+publicar o Worker: o Worker antigo convive com a coluna nova (ela tem `DEFAULT ''`), e o novo a encontra pronta.
+
+Se o Worker novo foi publicado antes da migração (deploy pelo botão da Cloudflare, ou uma versão anterior deste
+script, que publicava primeiro) e já recebeu um acesso, o `apply` falha com `duplicate column name: navegador` e
+o `npm run deploy` para aí. A coluna já está lá; basta marcar a migração como aplicada e rodar o deploy de novo:
 
 ```bash
 npx wrangler d1 execute DB --remote --command "INSERT OR IGNORE INTO d1_migrations (name) VALUES ('0003_navegador.sql')"
 ```
-
-Para evitar isso, aplique a migração antes de publicar (`npx wrangler d1 migrations apply DB --remote` e só
-depois `npx wrangler deploy`).
 
 ## Diferenças em relação ao servidor Python
 

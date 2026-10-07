@@ -132,8 +132,9 @@
 
     /* Funil: 4 barras horizontais, uma por etapa, e o selo de erros ao lado */
     .funil-card { display: flex; gap: 24px; align-items: center; }
-    .funil { flex: 1; min-width: 0; }
-    .etapa { display: grid; grid-template-columns: 56px minmax(0, 1fr) minmax(150px, auto); gap: 12px; align-items: center; padding: 4px 0; }
+    /* uma grade só para as 4 etapas (nome, barra, número): as barras ficam alinhadas entre si, seja qual for a legenda */
+    .funil { flex: 1; min-width: 0; display: grid; grid-template-columns: 56px minmax(0, 1fr) minmax(150px, auto); gap: 8px 12px; align-items: center; }
+    .etapa { display: contents; }
     .etapa-nome { color: var(--ink-2); font-size: 13px; }
     .etapa-barra { height: 16px; background: var(--wash); border-radius: 0 4px 4px 0; overflow: hidden; }
     .etapa-preenchido { height: 100%; background: var(--series-1); border-radius: 0 4px 4px 0; min-width: 2px; transition: width .25s; }
@@ -199,7 +200,7 @@
 
     /* Tabelas */
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
-    th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--grid); }
+    th, td { text-align: left; padding: 7px 6px; border-bottom: 1px solid var(--grid); }
     th { color: var(--ink-2); font-weight: 600; font-size: 12.5px; white-space: nowrap; }
     td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
     .rolavel { overflow-x: auto; -webkit-overflow-scrolling: touch; }
@@ -212,10 +213,13 @@
     .tabela-vista { display: none; margin-top: 8px; max-height: 320px; overflow: auto; }
     figure.card.modo-tabela .tabela-vista { display: block; }
     figure.card.modo-tabela .grafico { display: none; }
-    .grade-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; margin-bottom: 16px; }
+    /* Tabelas por grupo, duas por linha (cada uma tem 7 colunas; em 3 por linha elas rolariam); a última sozinha ocupa a linha toda */
+    .grade-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr)); gap: 16px; margin-bottom: 16px; }
     .grade-2 .card { margin: 0; min-width: 0; }
+    .grade-2 > .card:last-child:nth-child(odd) { grid-column: 1 / -1; }
     .toggle-eventos { margin: 0 0 16px; }
-    #card-eventos td code, #card-eventos td .codigo { color: var(--muted); font-size: 12px; margin-left: 6px; }
+    #card-eventos td code { color: var(--muted); font-size: 12px; }
+    #card-eventos td code:not(:first-child) { margin-left: 6px; } /* depois do rótulo humano */
 
     .vazio { text-align: center; padding: 40px 16px; }
     .vazio pre { background: var(--wash); border-radius: 6px; text-align: left; padding: 12px; overflow: auto; font-size: 12.5px; }
@@ -230,14 +234,18 @@
       .filtros { position: static; padding: 10px; gap: 8px; }
       .chips { width: 100%; overflow-x: auto; flex-wrap: nowrap; scrollbar-width: none; padding-bottom: 2px; }
       .chips::-webkit-scrollbar { display: none; }
+      #chip-navegador { order: -1; } /* o chip do filtro vem antes dos períodos, para não ficar escondido na rolagem */
       .personalizado { width: 100%; }
       .personalizado label { display: inline-flex; align-items: center; gap: 4px; flex: 1; min-width: 0; }
-      .personalizado input[type="date"] { flex: 1; min-width: 0; }
+      .personalizado input[type="date"] { flex: 1; min-width: 0; padding: 5px 4px; font-size: 13px; } /* cabe a data inteira ao lado de "Aplicar" */
+      .personalizado .botao { padding: 6px 8px; }
+      .card-topo .botao { white-space: nowrap; }
       .selecoes { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
       .selecoes select { width: 100%; }
       .filtros .direita { margin-left: 0; width: 100%; justify-content: space-between; }
       .funil-card { flex-direction: column; align-items: stretch; gap: 12px; }
-      .etapa { grid-template-columns: 52px minmax(0, 1fr) auto; gap: 8px; }
+      .funil-card .selo { align-self: flex-start; }
+      .funil { grid-template-columns: 52px minmax(0, 1fr) auto; gap: 8px; }
       .etapa-num small { display: block; margin: 0; }
       .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .tile { padding: 12px; }
@@ -337,14 +345,12 @@
       <div class="dica" id="dica-dias"></div>
     </figure>
 
-    <div class="grade-2">
+    <div class="grade-2" id="grupos">
       <div class="card"><h2>Origens</h2><p class="legenda-texto">utm_source, ou o site de onde a pessoa veio.</p><div id="origens" class="rolavel"></div></div>
-      <div class="card"><h2>Dispositivos</h2><p class="legenda-texto">Pelo navegador do visitante.</p><div id="dispositivos" class="rolavel"></div></div>
-    </div>
-    <div class="grade-2">
       <div class="card"><h2>Navegadores</h2><p class="legenda-texto">Clique num navegador para ver só ele.</p><div id="navegadores" class="rolavel"></div></div>
       <div class="card"><h2>Criativos (utm_content)</h2><p class="legenda-texto">Qual anúncio trouxe a pessoa.</p><div id="criativos" class="rolavel"></div></div>
       <div class="card"><h2>Campanhas (utm_campaign)</h2><p class="legenda-texto">Qual campanha trouxe a pessoa.</p><div id="campanhas" class="rolavel"></div></div>
+      <div class="card"><h2>Dispositivos</h2><p class="legenda-texto">Pelo navegador do visitante.</p><div id="dispositivos" class="rolavel"></div></div>
     </div>
 
     <div class="toggle-eventos"><button type="button" class="botao" id="toggle-eventos" aria-expanded="false" aria-controls="card-eventos">Mostrar eventos técnicos</button></div>
@@ -466,9 +472,14 @@
   }
 
   function mostrarSenha(incorreta) {
+    const tela = $('#pedir-token');
+    const jaVisivel = !tela.classList.contains('oculto');
     ['#conteudo', '#vazio', '#filtros', '#sair', '#erro-rede'].forEach((sel) => $(sel).classList.add('oculto'));
-    $('#pedir-token').classList.remove('oculto');
-    $('#erro-token').classList.toggle('oculto', !incorreta);
+    tela.classList.remove('oculto');
+    if (incorreta) $('#erro-token').classList.remove('oculto');
+    else if (!jaVisivel) $('#erro-token').classList.add('oculto');
+    // A atualização automática (e a volta para a aba) não apaga o que a pessoa está digitando nem o aviso de senha incorreta.
+    if (jaVisivel && !incorreta) return;
     $('#campo-token').value = '';
     $('#campo-token').focus();
   }
@@ -651,6 +662,16 @@
     selo.classList.toggle('ruim', ruim);
   }
 
+  // Cliques no botão: o número é o total de sessões que clicaram; a taxa é só de quem chegou ao pitch (com som), a
+  // mesma do funil. Cliques de quem não chegou (sessão muda na tela final, botão liberado por tempo antes do pitch)
+  // ficam avisados à parte, em vez de estourar a taxa acima de 100 %.
+  function legendaCliques(r) {
+    const total = r.cliques || 0;
+    const noPitch = r.cliques_pitch != null ? r.cliques_pitch : total;
+    const fora = total - noPitch;
+    return fmtPct(r.taxa_clique) + ' de quem chegou ao pitch' + (fora > 0 ? ' · ' + fmtN.format(fora) + ' de quem não chegou' : '');
+  }
+
   function renderKpis(r) {
     const temPitch = r.pitch != null || r.pitch_misto;
     const pitchTxt = r.pitch != null ? 'pitch aos ' + fmtTempo(r.pitch) : r.pitch_misto ? 'pitch de cada player' : 'sem data-pitch no player';
@@ -658,7 +679,7 @@
       tile('Visualizações da página', fmtN.format(r.sessoes), fmtN.format(r.visitantes) + ' visitantes únicos'),
       tile('Plays (clicaram para ouvir)', fmtN.format(r.plays), 'taxa de play ' + fmtPct(r.taxa_play)),
       tile('Chegaram ao pitch', temPitch ? fmtN.format(r.chegaram_pitch) : '—', (temPitch ? fmtPct(r.taxa_pitch) + ' dos plays · ' : '') + pitchTxt),
-      tile('Cliques no botão', fmtN.format(r.cliques || 0), fmtPct(r.taxa_clique) + ' de quem chegou ao pitch'),
+      tile('Cliques no botão', fmtN.format(r.cliques || 0), legendaCliques(r)),
       tile('Terminaram o vídeo', fmtN.format(r.terminaram), fmtPct(r.taxa_conclusao) + ' dos plays'),
       tile('Tempo médio assistido', fmtTempo(r.tempo_medio), 'mediana ' + fmtTempo(r.tempo_mediano) + ' · ' + fmtPct(r.engajamento, 0) + ' do vídeo'),
     );
@@ -871,7 +892,7 @@
     opcoes = opcoes || {};
     const tabela = document.createElement('table');
     const cab = tabela.createTHead().insertRow();
-    [titulo, 'Visualizações', 'Plays', 'Taxa de play', 'Pitch', 'Cliques', 'Terminaram'].forEach((h, i) => cab.appendChild(texto('th', h, i ? { class: 'num' } : {})));
+    [titulo, 'Visitas', 'Plays', 'Taxa de play', 'Pitch', 'Cliques', 'Terminaram'].forEach((h, i) => cab.appendChild(texto('th', h, i ? { class: 'num' } : {})));
     const corpo = tabela.createTBody();
     (grupos || []).forEach((g) => {
       const tr = corpo.insertRow();
@@ -890,7 +911,11 @@
       tr.appendChild(texto('td', g.sessoes ? fmtPct(g.plays / g.sessoes) : '—', { class: 'num' }));
       tr.appendChild(texto('td', g.plays ? fmtN.format(g.pitch) + ' (' + fmtPct(g.pitch / g.plays, 0) + ')' : '—', { class: 'num' }));
       const cliques = g.cliques || 0;
-      tr.appendChild(texto('td', cliques ? fmtN.format(cliques) + (g.pitch ? ' (' + fmtPct(cliques / g.pitch, 0) + ')' : '') : '0', { class: 'num' }));
+      const cliquesPitch = g.cliques_pitch != null ? g.cliques_pitch : cliques; // a % é só de quem chegou ao pitch (nunca passa de 100 %)
+      const fora = cliques - cliquesPitch;
+      const attrsCliques = { class: 'num' };
+      if (g.pitch) attrsCliques.title = fmtN.format(cliquesPitch) + ' de ' + fmtN.format(g.pitch) + ' que chegaram ao pitch clicaram' + (fora > 0 ? '; ' + fmtN.format(fora) + ' clique(s) de quem não chegou ao pitch' : '');
+      tr.appendChild(texto('td', cliques ? fmtN.format(cliques) + (g.pitch ? ' (' + fmtPct(cliquesPitch / g.pitch, 0) + ')' : '') : '0', attrsCliques));
       tr.appendChild(texto('td', g.plays ? fmtN.format(g.terminaram) + ' (' + fmtPct(g.terminaram / g.plays, 0) + ')' : '—', { class: 'num' }));
     });
     $(sel).replaceChildren(grupos && grupos.length ? tabela : texto('p', 'Sem dados no período.', { class: 'legenda-texto' }));

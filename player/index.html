@@ -80,6 +80,8 @@
   <section>
     <h2>Como colocar na sua página</h2>
 <pre><code>&lt;link rel="stylesheet" href="vsl-player.css"&gt;
+&lt;!-- esconde o botão desde a primeira pintura (o data-show só age quando o script roda) --&gt;
+&lt;style&gt;#botao-comprar:not(.vsl-visible){display:none!important}&lt;/style&gt;
 
 &lt;div class="vsl-player"
      data-src="https://seu-cdn.com/vsl.mp4"
@@ -92,8 +94,8 @@
 &lt;a id="botao-comprar" href="..."&gt;COMPRAR AGORA&lt;/a&gt;
 
 &lt;script src="vsl-player.js"&gt;&lt;/script&gt;
-&lt;!-- garantia: se o player não carregar em 10 s, os elementos com delay aparecem mesmo assim --&gt;
-&lt;script&gt;setTimeout(function(){if(!window.VSLPlayer)document.querySelectorAll('[data-vsl-show-at]').forEach(function(e){e.classList.add('vsl-visible')})},10000)&lt;/script&gt;</code></pre>
+&lt;!-- garantia: se o player não carregar em 10 s, os elementos com delay (e o botão do data-show) aparecem mesmo assim --&gt;
+&lt;script&gt;setTimeout(function(){if(!window.VSLPlayer)document.querySelectorAll('[data-vsl-show-at],#botao-comprar').forEach(function(e){e.classList.add('vsl-visible')})},10000)&lt;/script&gt;</code></pre>
   </section>
 </main>
 

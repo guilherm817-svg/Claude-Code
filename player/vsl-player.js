@@ -398,6 +398,9 @@
       this._lastSaved = -1;
       this._seekAllowed = false;
       this._pendingSeek = null;
+      this._seekTarget = null;     // alvo do último _seek() ainda não confirmado pelo `seeked`
+      this._seekRetry = null;      // alvo que o navegador recusou (stream sem Range): a posição fica nele e o seek é refeito quando der
+      this._seekRetried = 0;       // quantas vezes o seek recusado já foi refeito (limite para não insistir)
       this._listeners = [];
       this._isFirst = VSLPlayer.instances.length === 0;
       this._attempts = 0;          // retentativas automáticas já feitas desde a última falha
@@ -406,6 +409,7 @@
       this._tapGuardUntil = 0;     // ignora o segundo toque do impaciente
       this._errorCode = null;
       this._hlsErrorType = null;
+      this._stateBeforeError = null; // 'paused' | 'modal' quando o erro pegou o visitante parado: a retentativa não retoma sozinha
       this._sourceAttached = false;
 
       VSLPlayer.instances.push(this);
@@ -618,7 +622,8 @@
       // Em `loading` o estado só muda com imagem na tela (primeiro quadro), não no play().
       this._listen(v, 'play', () => { if (this.state !== 'error' && this.state !== 'loading') this._setState(v.muted ? 'autoplaying' : 'playing'); });
       this._listen(v, 'playing', () => { this.root.classList.remove('vsl-buffering'); this._firstFrame(); });
-      this._listen(v, 'canplay', () => this.root.classList.remove('vsl-buffering'));
+      this._listen(v, 'canplay', () => { this.root.classList.remove('vsl-buffering'); this._retrySeek(); });
+      this._listen(v, 'progress', () => this._retrySeek());
       this._listen(v, 'waiting', () => this.root.classList.add('vsl-buffering'));
       this._listen(v, 'pause', () => {
         if (v.ended) return;
@@ -629,7 +634,7 @@
       this._listen(v, 'ended', () => this._onEnded());
       this._listen(v, 'timeupdate', () => { this._firstFrame(); this._onTime(); });
       this._listen(v, 'seeking', () => this._onSeeking());
-      this._listen(v, 'seeked', () => { this._seekAllowed = false; this._lastTime = v.currentTime; });
+      this._listen(v, 'seeked', () => this._onSeeked());
       this._listen(v, 'ratechange', () => { if (this.opts.lockSpeed && v.playbackRate !== this.opts.speed) v.playbackRate = this.opts.speed; });
       this._listen(v, 'error', () => this._onError(v.error && v.error.code));
       this._listen(document, 'visibilitychange', () => this._checkPitch());
@@ -650,9 +655,17 @@
 
     _onTime() {
       const v = this.video;
+      // Há um seek pendente para a posição guardada (retentativa recarregou a fonte; iOS antes dos metadados): o
+      // timeupdate em 0 que o load() dispara não pode apagar _lastTime nem a posição salva. Assim que der, aplica o seek.
+      if (this._pendingSeek != null) {
+        if (v.readyState >= 1) { const alvo = this._pendingSeek; this._pendingSeek = null; this._seek(alvo); }
+        return;
+      }
       const t = v.currentTime;
       const d = v.duration;
-      if (!v.seeking) this._lastTime = t;
+      if (this._seekRetry != null && t >= this._seekRetry) this._seekRetry = null; // tocou até passar do alvo recusado
+      // Seek em andamento ou recusado (stream sem Range): o vídeo pode estar em 0, mas a posição que vale é o alvo.
+      if (!v.seeking) this._lastTime = this._position();
       if (!v.paused && !v.muted) this.tracker.second(t); // retenção só conta o que foi visto com som
       if (t > this.reached) this.reached = t;
       if (t - this._lastSaved >= 1 || t < this._lastSaved) { this._lastSaved = t; this._persist(false); }
@@ -689,6 +702,29 @@
       }
     }
 
+    // Fim de um seek. Se o navegador recusou o alvo pedido (num stream sem Range `seekable` é [0,0] e o seek cai em 0),
+    // a posição não se perde: _lastTime fica no alvo, :pos não cai abaixo dele e o seek é refeito quando der (_retrySeek).
+    _onSeeked() {
+      const v = this.video;
+      this._seekAllowed = false;
+      const alvo = this._seekTarget;
+      this._seekTarget = null;
+      if (alvo != null && Math.abs(v.currentTime - alvo) > 1.5) { this._seekRetry = alvo; this._lastTime = alvo; }
+      else { this._seekRetried = 0; this._lastTime = v.currentTime; }
+      this._renderPausePoster();
+    }
+
+    // Seek recusado: assim que `seekable` cobrir o alvo (progress/canplay), pede de novo; desiste depois de 3 vezes.
+    _retrySeek() {
+      const v = this.video;
+      const alvo = this._seekRetry;
+      if (alvo == null || v.readyState < 1 || v.seeking || this._seekRetried >= 3) return;
+      const r = v.seekable;
+      for (let i = 0; i < r.length; i++) {
+        if (alvo >= r.start(i) && alvo <= r.end(i)) { this._seekRetried++; this._seek(alvo); return; }
+      }
+    }
+
     _onEnded() {
       this._setState('ended');
       storage.remove(this.id + ':pos');
@@ -704,6 +740,8 @@
       if (this.state === 'error' || this._retryTimer) return;
       this._errorCode = code == null ? 'unknown' : code;
       this._hlsErrorType = hlsType || null;
+      // Pausado, ou decidindo se continua de onde parou: a retentativa recarrega a fonte, mas não retoma sozinha.
+      this._stateBeforeError = this.state === 'paused' || this.state === 'modal' ? this.state : null;
       clearTimeout(this._frameTimer);
       this._frameTimer = null;
       if (code === 'hls-unsupported' || this._attempts >= RETRY_DELAYS.length) { this._fail(); return; }
@@ -722,22 +760,38 @@
         const Hls = global.Hls;
         const tipos = (Hls && Hls.ErrorTypes) || {};
         const ultimoRecurso = this._attempts >= RETRY_DELAYS.length;
-        if (!ultimoRecurso && this._hlsErrorType === tipos.NETWORK_ERROR) { this.hls.startLoad(); this._play(); return; }
-        if (!ultimoRecurso && this._hlsErrorType === tipos.MEDIA_ERROR) { this.hls.recoverMediaError(); this._play(); return; }
+        if (!ultimoRecurso && this._hlsErrorType === tipos.NETWORK_ERROR) { this.hls.startLoad(); this._resumeAfterRetry(); return; }
+        if (!ultimoRecurso && this._hlsErrorType === tipos.MEDIA_ERROR) { this.hls.recoverMediaError(); this._resumeAfterRetry(); return; }
+        this._keepPosition();
         this.hls.destroy();
         this.hls = null;
         this._sourceAttached = false;
       }
+      this._keepPosition();
       if (!this._sourceAttached) { this._attachSource(() => this._resumeAfterRetry()); return; }
-      v.load(); // nativo: recarrega a fonte; volta para onde estava quando os metadados chegarem
+      v.load(); // nativo: recarrega a fonte (zera o currentTime); o seek pendente devolve a posição quando os metadados chegarem
       this._resumeAfterRetry();
+    }
+
+    // Antes de recarregar a fonte: a posição vira um seek pendente, que o timeupdate em 0 do load() não apaga (ver _onTime).
+    _keepPosition() {
+      if (this._pendingSeek == null && this._lastTime > 0) this._pendingSeek = this._lastTime;
+      this._seekTarget = null; // o seek em andamento morre com a fonte; a posição segue no seek pendente
     }
 
     _resumeAfterRetry() {
       const v = this.video;
-      if (this._lastTime > 0) this._pendingSeek = this._lastTime;
       v.muted = !this.unmuted; // mudo se ainda não liberou o som; com som se já liberou
       if (v.muted) v.setAttribute('muted', ''); else v.removeAttribute('muted');
+      const antes = this._stateBeforeError;
+      this._stateBeforeError = null;
+      if (antes === 'paused' || antes === 'modal') {
+        // O visitante tinha pausado (ou estava no "continuar de onde parou?"): a fonte foi recarregada, mas o vídeo
+        // não volta a tocar sozinho. O toque (ou a escolha no modal) retoma da posição guardada.
+        this.root.classList.remove('vsl-buffering');
+        this._setState(antes, true); // o visitante não pausou de novo: sem evento `pause` repetido
+        return;
+      }
       this._play();
     }
 
@@ -753,7 +807,18 @@
 
     _persist(force) {
       storage.set(this.id + ':reached', round(this.reached));
-      if (this.unmuted && (force || !this.video.paused)) storage.set(this.id + ':pos', round(this.video.currentTime));
+      if (!this.unmuted || !(force || !this.video.paused)) return;
+      storage.set(this.id + ':pos', round(this._position()));
+    }
+
+    // Posição que vale para guardar e decidir: a do seek pendente (fonte recarregada, <video> em 0); com um seek em
+    // andamento (o Chromium dispara um timeupdate antes do `seeked`) ou recusado (stream sem Range), a maior entre a
+    // atual e o alvo (aceito, o <video> já está no alvo; recusado, vale o alvo); senão a atual.
+    _position() {
+      if (this._pendingSeek != null) return this._pendingSeek;
+      const t = this.video ? this.video.currentTime : 0;
+      const alvo = this._seekTarget != null ? this._seekTarget : this._seekRetry;
+      return alvo != null ? Math.max(t, alvo) : t;
     }
 
     _savedPosition() {
@@ -774,6 +839,8 @@
       const v = this.video;
       if (v.readyState < 1) { this._pendingSeek = time; return; } // iOS: só depois de carregar os metadados
       this._seekAllowed = true;
+      this._seekTarget = time;
+      this._seekRetry = null;
       this._lastTime = time;
       try { v.currentTime = time; } catch (e) { /* ignora */ }
       clearTimeout(this._seekTimer);
@@ -782,22 +849,27 @@
 
     // -- estados e interação -------------------------------------------------
 
-    _setState(state) {
+    // `quiet`: restaura um estado sem repetir o evento de interação (pause/play/autoplay) para o analytics;
+    // usado quando a retentativa ou o watchdog devolvem o player ao estado em que o visitante o deixou.
+    _setState(state, quiet) {
       if (this.state === state) return;
       const previous = this.state;
       this.state = state;
       this.root.setAttribute('data-state', state);
       if (state !== 'loading') { clearTimeout(this._frameTimer); this._frameTimer = null; }
       this._renderPausePoster();
-      if (state === 'autoplaying') this.emit('autoplay');
-      else if (state === 'playing') this.emit('play', { resumed: previous === 'paused' });
-      else if (state === 'paused') this.emit('pause');
-      this.emit('state', { state, previous });
+      if (!quiet) {
+        if (state === 'autoplaying') this.emit('autoplay');
+        else if (state === 'playing') this.emit('play', { resumed: previous === 'paused' });
+        else if (state === 'paused') this.emit('pause');
+      }
+      this.emit('state', { state, previous, restored: !!quiet });
     }
 
     // Miniatura de pausa: só pausado, com imagem configurada e depois do pitch (sem pitch, em qualquer pausa).
     _renderPausePoster() {
-      const depoisDoPitch = this.currentTime >= (this._pitchAt == null ? 0 : this._pitchAt);
+      // Posição guardada, não o <video> (que está em 0 logo depois do load() de uma retentativa).
+      const depoisDoPitch = this._position() >= (this._pitchAt == null ? 0 : this._pitchAt);
       if (this.state === 'paused' && this.opts.pausePosterLate && depoisDoPitch) this.root.setAttribute('data-pause-poster', 'on');
       else this.root.removeAttribute('data-pause-poster');
     }
@@ -845,7 +917,9 @@
       switch (this.state) {
         case 'loading':
         case 'idle':
-          this._startWithSound();
+          // Sessão que já tem som (retentativa presa, play() recusado depois de um erro): o toque retoma de onde parou.
+          if (this.unmuted) this._playWithSound(this._lastTime > 0 ? this._lastTime : null);
+          else this._startWithSound();
           break;
         case 'autoplaying':
           this._startWithSound();
@@ -937,6 +1011,10 @@
         this._attempts = 0;
         this.root.classList.remove('vsl-buffering');
         try { this.video.pause(); } catch (e) { /* ignora */ }
+        // Sessão que já tem som (uma retentativa presa na rede): "toque para continuar", e o toque retoma de onde parou.
+        // A posição volta a ser um seek pendente: se o navegador recarregar o <video> por conta própria enquanto
+        // espera, o timeupdate em 0 não a apaga, e o play() seguinte a aplica de novo.
+        if (this.unmuted) { this._keepPosition(); this._setState('paused', true); return; } // sem evento `pause`: ninguém pausou
         this._setState('idle');
         this.emit('autoplay_blocked', { reason: 'no-frame' });
       }, FIRST_FRAME_TIMEOUT);
@@ -1026,6 +1104,7 @@
       clearTimeout(this._retryTimer);
       this._retryTimer = null;
       this._attempts = 0;
+      this._stateBeforeError = null; // quem pede para tentar de novo quer ver o vídeo tocar
       this._retry();
     }
 

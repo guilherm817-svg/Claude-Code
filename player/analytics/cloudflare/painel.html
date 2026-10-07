@@ -19,6 +19,9 @@
       --series-2: #eb6834;
       --wash: rgba(11, 11, 11, 0.04);
       --good: #006300;
+      --ruim: #b42318;
+      --ruim-fundo: rgba(208, 59, 59, 0.12);
+      --ruim-borda: rgba(208, 59, 59, 0.45);
     }
     @media (prefers-color-scheme: dark) {
       :root:where(:not([data-theme="light"])) {
@@ -35,6 +38,9 @@
         --series-2: #d95926;
         --wash: rgba(255, 255, 255, 0.06);
         --good: #0ca30c;
+        --ruim: #ff8a80;
+        --ruim-fundo: rgba(255, 99, 99, 0.14);
+        --ruim-borda: rgba(255, 99, 99, 0.45);
       }
     }
     :root[data-theme="dark"] {
@@ -51,6 +57,9 @@
       --series-2: #d95926;
       --wash: rgba(255, 255, 255, 0.06);
       --good: #0ca30c;
+      --ruim: #ff8a80;
+      --ruim-fundo: rgba(255, 99, 99, 0.14);
+      --ruim-borda: rgba(255, 99, 99, 0.45);
     }
 
     * { box-sizing: border-box; }
@@ -64,33 +73,56 @@
       padding: 0 16px 48px;
     }
     main { max-width: 1120px; margin: 0 auto; }
+    .cabecalho { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
     h1 { font-size: 20px; margin: 24px 0 2px; }
     .sub { color: var(--ink-2); margin: 0 0 16px; }
+    #sair { margin-top: 24px; flex: none; }
     h2 { font-size: 15px; font-weight: 600; margin: 0; }
     .legenda-texto { color: var(--ink-2); font-size: 13px; margin: 2px 0 0; }
     a { color: var(--series-1); }
     button, select, input { font: inherit; color: inherit; }
+    code { background: var(--wash); border-radius: 4px; padding: 1px 5px; font-size: 12.5px; }
 
-    /* Filtros: uma linha, acima de tudo */
+    /* Filtros: uma linha, acima de tudo; no celular viram linhas (chips roláveis, datas, seleções, ações) */
     .filtros {
       display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center;
       padding: 10px 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
       margin-bottom: 16px; position: sticky; top: 8px; z-index: 5;
     }
-    .periodos { display: flex; gap: 2px; background: var(--wash); border-radius: 8px; padding: 2px; }
+    .chips { display: flex; gap: 8px; align-items: center; }
+    .periodos { display: flex; gap: 2px; background: var(--wash); border-radius: 8px; padding: 2px; flex: none; }
     .periodos button {
-      border: 0; background: transparent; padding: 6px 10px; border-radius: 6px; cursor: pointer; color: var(--ink-2);
+      border: 0; background: transparent; padding: 6px 10px; border-radius: 6px; cursor: pointer; color: var(--ink-2); white-space: nowrap;
     }
     .periodos button:hover { background: var(--border); }
     .periodos button[aria-pressed="true"] { background: var(--surface); color: var(--ink); font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,.12); }
+    .chip {
+      display: inline-flex; align-items: center; gap: 6px; flex: none; white-space: nowrap;
+      background: var(--wash); border: 1px solid var(--series-1); color: var(--ink); border-radius: 999px; padding: 3px 6px 3px 10px; font-size: 13px;
+    }
+    .chip button {
+      border: 0; background: var(--border); color: inherit; border-radius: 50%; width: 22px; height: 22px; cursor: pointer;
+      line-height: 1; font-size: 15px; display: inline-flex; align-items: center; justify-content: center;
+    }
+    .chip button:hover { background: var(--series-1); color: #fff; }
     .personalizado { display: flex; gap: 6px; align-items: center; color: var(--ink-2); }
+    .selecoes { display: flex; gap: 8px; align-items: center; }
     .filtros input[type="date"], .filtros select {
-      border: 1px solid var(--border); background: var(--surface); border-radius: 6px; padding: 5px 8px;
+      border: 1px solid var(--border); background: var(--surface); border-radius: 6px; padding: 5px 8px; max-width: 100%;
     }
     .filtros .direita { margin-left: auto; display: flex; gap: 8px; align-items: center; }
     .botao { border: 1px solid var(--border); background: var(--surface); border-radius: 6px; padding: 6px 10px; cursor: pointer; }
     .botao:hover { background: var(--wash); }
     .atualizado { color: var(--muted); font-size: 12px; }
+
+    /* Faixas de aviso e de erro */
+    .aviso { margin: 0 0 16px; padding: 10px 14px; border-radius: 10px; background: rgba(250, 178, 25, 0.14); border: 1px solid rgba(250, 178, 25, 0.5); color: var(--ink); font-size: 13px; }
+    .faixa-erro {
+      display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 0 0 16px; padding: 10px 14px; border-radius: 10px;
+      background: var(--ruim-fundo); border: 1px solid var(--ruim-borda); color: var(--ink); font-size: 13px;
+    }
+    .faixa-erro strong { color: var(--ruim); }
+    .desatualizado { opacity: .5; }
 
     /* Cartões */
     .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin: 0 0 16px; }
@@ -98,12 +130,41 @@
     figure.card { position: relative; }
     .carregando { opacity: .55; transition: opacity .2s; }
 
+    /* Funil: 4 barras horizontais, uma por etapa, e o selo de erros ao lado */
+    .funil-card { display: flex; gap: 24px; align-items: center; }
+    /* uma grade só para as 4 etapas (nome, barra, número): as barras ficam alinhadas entre si, seja qual for a legenda */
+    .funil { flex: 1; min-width: 0; display: grid; grid-template-columns: 56px minmax(0, 1fr) minmax(150px, auto); gap: 8px 12px; align-items: center; }
+    .etapa { display: contents; }
+    .etapa-nome { color: var(--ink-2); font-size: 13px; }
+    .etapa-barra { height: 16px; background: var(--wash); border-radius: 0 4px 4px 0; overflow: hidden; }
+    .etapa-preenchido { height: 100%; background: var(--series-1); border-radius: 0 4px 4px 0; min-width: 2px; transition: width .25s; }
+    .etapa-num { text-align: left; white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .etapa-num strong { font-size: 15px; font-weight: 600; }
+    .etapa-num small { color: var(--muted); font-size: 12px; margin-left: 6px; }
+    .selo {
+      display: inline-flex; align-items: center; gap: 6px; flex: none; white-space: nowrap;
+      padding: 5px 12px; border-radius: 999px; font-size: 13px; background: var(--wash); color: var(--ink-2); border: 1px solid transparent;
+    }
+    .selo.ruim { background: var(--ruim-fundo); color: var(--ruim); border-color: var(--ruim-borda); font-weight: 600; }
+
     /* Painel de números */
     .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 16px; }
-    .tile { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; }
+    .tile { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; min-width: 0; }
     .tile .rotulo { color: var(--ink-2); font-size: 13px; }
     .tile .valor { font-size: 30px; font-weight: 600; line-height: 1.15; margin: 4px 0 2px; }
     .tile .detalhe { color: var(--muted); font-size: 12.5px; }
+    /* esqueleto do primeiro carregamento */
+    .esqueleto .rotulo, .esqueleto .valor, .esqueleto .detalhe, .esqueleto .etapa-nome, .esqueleto .etapa-num {
+      background: var(--wash); border-radius: 6px; color: transparent !important; animation: pulsar 1.4s ease-in-out infinite;
+    }
+    .esqueleto .rotulo { width: 70%; height: 16px; }
+    .esqueleto .valor { width: 50%; height: 32px; }
+    .esqueleto .detalhe { width: 85%; height: 14px; margin-top: 4px; }
+    .esqueleto .etapa-nome { height: 14px; }
+    .esqueleto .etapa-num { width: 110px; height: 16px; }
+    .esqueleto .etapa-barra { opacity: .5; }
+    @keyframes pulsar { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+    #conteudo.inicial > :not(.funil-card):not(.kpis) { display: none; }
 
     /* Gráficos */
     svg { display: block; width: 100%; overflow: visible; }
@@ -139,50 +200,91 @@
 
     /* Tabelas */
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
-    th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--grid); }
-    th { color: var(--ink-2); font-weight: 600; font-size: 12.5px; }
+    th, td { text-align: left; padding: 7px 6px; border-bottom: 1px solid var(--grid); }
+    th { color: var(--ink-2); font-weight: 600; font-size: 12.5px; white-space: nowrap; }
     td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-    .rolavel { overflow-x: auto; }
+    .rolavel { overflow-x: auto; -webkit-overflow-scrolling: touch; }
     tr:last-child td { border-bottom: 0; }
+    tr.clicavel { cursor: pointer; }
+    tr.clicavel:hover td { background: var(--wash); }
+    tr.clicavel.ativa td { background: var(--wash); font-weight: 600; }
+    .filtrar { border: 0; background: transparent; padding: 0; cursor: pointer; color: var(--series-1); text-decoration: underline dotted; text-underline-offset: 3px; text-align: left; }
+    .filtrar:focus-visible { outline: 2px solid var(--series-1); outline-offset: 2px; border-radius: 3px; }
     .tabela-vista { display: none; margin-top: 8px; max-height: 320px; overflow: auto; }
     figure.card.modo-tabela .tabela-vista { display: block; }
     figure.card.modo-tabela .grafico { display: none; }
-    .grade-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
-    .grade-2 .card { margin: 0; }
+    /* Tabelas por grupo, duas por linha (cada uma tem 7 colunas; em 3 por linha elas rolariam); a última sozinha ocupa a linha toda */
+    .grade-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr)); gap: 16px; margin-bottom: 16px; }
+    .grade-2 .card { margin: 0; min-width: 0; }
+    .grade-2 > .card:last-child:nth-child(odd) { grid-column: 1 / -1; }
+    .toggle-eventos { margin: 0 0 16px; }
+    #card-eventos td code { color: var(--muted); font-size: 12px; }
+    #card-eventos td code:not(:first-child) { margin-left: 6px; } /* depois do rótulo humano */
 
     .vazio { text-align: center; padding: 40px 16px; }
-    .vazio code, .vazio pre { background: var(--wash); border-radius: 6px; padding: 2px 6px; font-size: 12.5px; }
-    .vazio pre { text-align: left; padding: 12px; overflow: auto; }
+    .vazio pre { background: var(--wash); border-radius: 6px; text-align: left; padding: 12px; overflow: auto; font-size: 12.5px; }
     .oculto { display: none !important; }
-    .token { display: flex; gap: 8px; justify-content: center; margin-top: 12px; }
-    .token input { border: 1px solid var(--border); background: var(--surface); border-radius: 6px; padding: 6px 8px; width: 240px; }
-    .erro { color: #d03b3b; }
-    .aviso { margin: 0 0 16px; padding: 10px 14px; border-radius: 10px; background: rgba(250, 178, 25, 0.14); border: 1px solid rgba(250, 178, 25, 0.5); color: var(--ink); font-size: 13px; }
+    .token { display: flex; gap: 8px; justify-content: center; margin-top: 12px; flex-wrap: wrap; }
+    .token input { border: 1px solid var(--border); background: var(--surface); border-radius: 6px; padding: 6px 8px; width: 240px; max-width: 100%; }
+    .lembrar { display: inline-flex; align-items: center; gap: 6px; margin-top: 10px; color: var(--ink-2); cursor: pointer; }
+    .so-leitor { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+    .erro { color: var(--ruim); }
+
     @media (max-width: 640px) {
-      .filtros { position: static; }
-      .tile .valor { font-size: 26px; }
+      .filtros { position: static; padding: 10px; gap: 8px; }
+      .chips { width: 100%; overflow-x: auto; flex-wrap: nowrap; scrollbar-width: none; padding-bottom: 2px; }
+      .chips::-webkit-scrollbar { display: none; }
+      #chip-navegador { order: -1; } /* o chip do filtro vem antes dos períodos, para não ficar escondido na rolagem */
+      .personalizado { width: 100%; }
+      .personalizado label { display: inline-flex; align-items: center; gap: 4px; flex: 1; min-width: 0; }
+      .personalizado input[type="date"] { flex: 1; min-width: 0; padding: 5px 4px; font-size: 13px; } /* cabe a data inteira ao lado de "Aplicar" */
+      .personalizado .botao { padding: 6px 8px; }
+      .card-topo .botao { white-space: nowrap; }
+      .selecoes { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+      .selecoes select { width: 100%; }
+      .filtros .direita { margin-left: 0; width: 100%; justify-content: space-between; }
+      .funil-card { flex-direction: column; align-items: stretch; gap: 12px; }
+      .funil-card .selo { align-self: flex-start; }
+      .funil { grid-template-columns: 52px minmax(0, 1fr) auto; gap: 8px; }
+      .etapa-num small { display: block; margin: 0; }
+      .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .tile { padding: 12px; }
+      .tile .valor { font-size: 24px; }
+      .tile .detalhe { font-size: 12px; }
+      .card { padding: 12px; }
     }
   </style>
 </head>
 <body>
 <main>
-  <h1>Retenção do VSL</h1>
-  <p class="sub">Quantas pessoas abriram a página, clicaram para ouvir, chegaram ao pitch e até onde assistiram.</p>
+  <header class="cabecalho">
+    <div>
+      <h1>Retenção do VSL</h1>
+      <p class="sub">Quantas pessoas abriram a página, clicaram para ouvir, chegaram ao pitch, clicaram no botão e até onde assistiram.</p>
+    </div>
+    <button type="button" class="botao oculto" id="sair">Sair</button>
+  </header>
 
-  <div class="filtros" id="filtros">
-    <div class="periodos" role="group" aria-label="Período">
-      <button type="button" data-periodo="hoje">Hoje</button>
-      <button type="button" data-periodo="7">7 dias</button>
-      <button type="button" data-periodo="30" aria-pressed="true">30 dias</button>
-      <button type="button" data-periodo="90">90 dias</button>
-      <button type="button" data-periodo="tudo">Tudo</button>
+  <div class="filtros oculto" id="filtros">
+    <div class="chips" id="chips">
+      <div class="periodos" role="group" aria-label="Período">
+        <button type="button" data-periodo="hoje">Hoje</button>
+        <button type="button" data-periodo="7" aria-pressed="true">7 dias</button>
+        <button type="button" data-periodo="30">30 dias</button>
+        <button type="button" data-periodo="90">90 dias</button>
+        <button type="button" data-periodo="tudo">Tudo</button>
+      </div>
+      <span class="chip oculto" id="chip-navegador"><span id="chip-navegador-texto"></span><button type="button" id="tirar-navegador" aria-label="Tirar o filtro de navegador" title="Tirar o filtro">×</button></span>
     </div>
     <div class="personalizado">
       <label>de <input type="date" id="de"></label>
       <label>até <input type="date" id="ate"></label>
       <button type="button" class="botao" id="aplicar">Aplicar</button>
     </div>
-    <select id="player" aria-label="Player"><option value="">Todos os players</option></select>
+    <div class="selecoes">
+      <select id="player" aria-label="Player"><option value="">Todos os players</option></select>
+      <select id="navegador" aria-label="Navegador"><option value="">Todos os navegadores</option></select>
+    </div>
     <div class="direita">
       <span class="atualizado" id="atualizado"></span>
       <a class="botao" id="csv" href="#">Exportar CSV</a>
@@ -191,18 +293,31 @@
   </div>
 
   <div id="pedir-token" class="card vazio oculto">
-    <h2>Este painel pede um token</h2>
-    <p class="legenda-texto">Informe o token configurado no servidor (opção <code>--token</code> no Python ou segredo <code>TOKEN</code> na Cloudflare).</p>
+    <h2>Digite a senha do painel</h2>
+    <p class="legenda-texto">É a opção <code>--token</code> do servidor Python ou o segredo <code>TOKEN</code> na Cloudflare.</p>
     <form class="token" id="form-token">
-      <input type="password" id="campo-token" placeholder="token" autocomplete="off">
+      <label class="so-leitor" for="campo-token">senha</label>
+      <input type="password" id="campo-token" placeholder="senha" autocomplete="current-password">
       <button type="submit" class="botao">Entrar</button>
     </form>
-    <p id="erro-token" class="erro oculto">Token inválido.</p>
+    <label class="lembrar"><input type="checkbox" id="lembrar"> Lembrar neste navegador</label>
+    <p id="erro-token" class="erro oculto" role="alert">Senha incorreta.</p>
+  </div>
+
+  <div id="erro-rede" class="faixa-erro oculto" role="alert">
+    <span><strong>Não consegui carregar os dados.</strong> <span id="erro-rede-detalhe"></span></span>
+    <button type="button" class="botao" id="tentar">Tentar de novo</button>
   </div>
 
   <div id="conteudo" class="oculto">
-    <p id="sem-token" class="aviso oculto">Este painel está sem senha: qualquer pessoa com o endereço vê os dados. Defina um token (opção <code>--token</code> no Python ou segredo <code>TOKEN</code> na Cloudflare).</p>
-    <section class="kpis" id="kpis"></section>
+    <p id="sem-token" class="aviso oculto">Este painel está sem senha: qualquer pessoa com o endereço vê os dados. Crie o segredo <code>TOKEN</code> na Cloudflare (Settings → Variables and Secrets). No servidor Python, use a opção <code>--token</code>.</p>
+    <p id="poucos-plays" class="aviso oculto" role="status"></p>
+
+    <section class="card funil-card" id="funil-card" aria-label="Funil de venda">
+      <div class="funil" id="funil"></div>
+      <span class="selo" id="erros"></span>
+    </section>
+    <section class="kpis" id="kpis" aria-label="Números do período"></section>
 
     <figure class="card" id="fig-retencao">
       <div class="card-topo">
@@ -230,11 +345,16 @@
       <div class="dica" id="dica-dias"></div>
     </figure>
 
-    <div class="grade-2">
+    <div class="grade-2" id="grupos">
       <div class="card"><h2>Origens</h2><p class="legenda-texto">utm_source, ou o site de onde a pessoa veio.</p><div id="origens" class="rolavel"></div></div>
+      <div class="card"><h2>Navegadores</h2><p class="legenda-texto">Clique num navegador para ver só ele.</p><div id="navegadores" class="rolavel"></div></div>
+      <div class="card"><h2>Criativos (utm_content)</h2><p class="legenda-texto">Qual anúncio trouxe a pessoa.</p><div id="criativos" class="rolavel"></div></div>
+      <div class="card"><h2>Campanhas (utm_campaign)</h2><p class="legenda-texto">Qual campanha trouxe a pessoa.</p><div id="campanhas" class="rolavel"></div></div>
       <div class="card"><h2>Dispositivos</h2><p class="legenda-texto">Pelo navegador do visitante.</p><div id="dispositivos" class="rolavel"></div></div>
     </div>
-    <div class="card" style="margin-top: 16px"><h2>Eventos</h2><p class="legenda-texto">Tudo o que o player registrou no período, inclusive eventos seus (<code>player.emit('cta_click')</code>).</p><div id="eventos" class="rolavel"></div></div>
+
+    <div class="toggle-eventos"><button type="button" class="botao" id="toggle-eventos" aria-expanded="false" aria-controls="card-eventos">Mostrar eventos técnicos</button></div>
+    <div class="card oculto" id="card-eventos"><h2>Eventos</h2><p class="legenda-texto">Tudo o que o player registrou no período, inclusive eventos seus (<code>player.emit('meu_evento')</code>).</p><div id="eventos" class="rolavel"></div></div>
   </div>
 
   <div id="vazio" class="card vazio oculto">
@@ -252,7 +372,7 @@
   // ---------------------------------------------------------------- utilidades
   const $ = (sel) => document.querySelector(sel);
   const fmtN = new Intl.NumberFormat('pt-BR');
-  const fmtPct = (x, casas) => (x * 100).toLocaleString('pt-BR', { maximumFractionDigits: casas == null ? 1 : casas }) + '%';
+  const fmtPct = (x, casas) => ((x || 0) * 100).toLocaleString('pt-BR', { maximumFractionDigits: casas == null ? 1 : casas }) + '%';
   const fmtTempo = (s) => {
     s = Math.max(0, Math.round(s));
     const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), r = s % 60;
@@ -281,21 +401,42 @@
     if (ticks[ticks.length - 1] < max) ticks.push(ticks[ticks.length - 1] + passo);
     return ticks;
   };
+  // Eventos que a pessoa dona do painel entende; o resto aparece pelo nome técnico.
   const NOMES_EVENTOS = {
-    ready: 'Carregou', autoplay: 'Autoplay (mudo)', autoplay_blocked: 'Autoplay bloqueado pelo aparelho',
-    unmute: 'Clique para ouvir (play)', play: 'Play / retomada', pause: 'Pausa', ended: 'Terminou o vídeo',
-    replay: 'Assistiu de novo', milestone: 'Marcos de 10 a 100 %', pitch: 'Evento pitch (1× por visitante, conta o mudo)', reach: 'Elemento liberado',
-    resume_prompt: 'Viu a pergunta de retomar', resume_continue: 'Continuou de onde parou', resume_restart: 'Começou do início',
-    seek_blocked: 'Tentou pular', fullscreen: 'Tela cheia', error: 'Erro ao carregar',
+    unmute: 'Clicou para ouvir', pitch: 'Chegou ao pitch', cta_click: 'Clicou no botão', ended: 'Terminou', error: 'Erro no vídeo',
+    resume_continue: 'Continuou de onde parou', resume_restart: 'Recomeçou', seek_blocked: 'Tentou adiantar', fullscreen: 'Tela cheia',
   };
+  // Os nomes que o servidor dá aos navegadores (app.js / servidor.py: navegador()); "Desconhecido" são as sessões antigas, sem a coluna.
+  const NAVEGADORES = ['Instagram', 'Facebook', 'TikTok', 'Chrome WebView', 'Samsung', 'Edge', 'Firefox', 'Chrome', 'Safari', 'Outro', 'Desconhecido'];
+  const ATUALIZAR_A_CADA = 300000; // 5 min
+  const ERRO_RUIM = 0.005;         // acima disso de sessões com erro, o selo fica vermelho
 
   // ---------------------------------------------------------------- estado e API
-  const estado = { periodo: '30', de: '', ate: '', player: '' };
+  // player: null = ainda não escolhido (o painel abre no player com mais sessões); '' = "Todos os players".
+  const estado = { periodo: '7', de: '', ate: '', player: null, navegador: '' };
   try { Object.assign(estado, JSON.parse(sessionStorage.getItem('vsl-painel') || '{}')); } catch (e) { /* ignora */ }
+  if (typeof estado.navegador !== 'string') estado.navegador = '';
+
+  // A senha fica no sessionStorage (só esta aba) ou, com "Lembrar neste navegador", no localStorage.
+  const CHAVE_TOKEN = 'vsl-token';
+  const armazens = [() => sessionStorage, () => localStorage];
+  const token = () => {
+    for (const armazem of armazens) { try { const v = armazem().getItem(CHAVE_TOKEN); if (v) return v; } catch (e) { /* bloqueado */ } }
+    return '';
+  };
+  const esquecerToken = () => armazens.forEach((armazem) => { try { armazem().removeItem(CHAVE_TOKEN); } catch (e) { /* ignora */ } });
+  const guardarToken = (valor, lembrar) => {
+    esquecerToken();
+    try { (lembrar ? localStorage : sessionStorage).setItem(CHAVE_TOKEN, valor); } catch (e) { /* ignora */ }
+  };
   // O token pode vir no fragmento (#token=...), que nunca sai do navegador, ou na query (?token=...), por compatibilidade.
   const urlToken = (/[#&]token=([^&]+)/.exec(location.hash) || [])[1] || new URLSearchParams(location.search).get('token');
-  if (urlToken) { try { sessionStorage.setItem('vsl-token', decodeURIComponent(urlToken)); } catch (e) { /* ignora */ } history.replaceState(null, '', location.pathname); }
-  const token = () => { try { return sessionStorage.getItem('vsl-token') || ''; } catch (e) { return ''; } };
+  if (urlToken) {
+    let valor = urlToken;
+    try { valor = decodeURIComponent(urlToken); } catch (e) { /* fica como veio */ }
+    guardarToken(valor, false);
+    history.replaceState(null, '', location.pathname);
+  }
 
   async function api(caminho, params) {
     const url = new URL(caminho, location.href);
@@ -312,12 +453,14 @@
     if (estado.periodo === 'custom') return { de: estado.de, ate: estado.ate };
     return { periodo: estado.periodo };
   }
+  // Tudo que /api/resumo e /api/sessoes.csv recebem: player, navegador e o período.
+  const parametros = () => Object.assign({ player: estado.player || '', navegador: estado.navegador }, filtros());
 
   let ultimo = null;
-  let timer = null;
   let pedeToken = null; // null = ainda não perguntou ao servidor
   let pedido = 0;       // número do último carregar(): respostas atrasadas de pedidos antigos são ignoradas
   const escrito = { de: '', ate: '' }; // último valor que o painel escreveu nos campos de data
+  const navegadoresVistos = new Set(); // nomes que apareceram em respostas sem filtro de navegador
 
   function preencherDatas(de, ate) {
     [['#de', de || ''], ['#ate', ate || '']].forEach(([sel, valor]) => {
@@ -328,37 +471,67 @@
     });
   }
 
+  function mostrarSenha(incorreta) {
+    const tela = $('#pedir-token');
+    const jaVisivel = !tela.classList.contains('oculto');
+    ['#conteudo', '#vazio', '#filtros', '#sair', '#erro-rede'].forEach((sel) => $(sel).classList.add('oculto'));
+    tela.classList.remove('oculto');
+    if (incorreta) $('#erro-token').classList.remove('oculto');
+    else if (!jaVisivel) $('#erro-token').classList.add('oculto');
+    // A atualização automática (e a volta para a aba) não apaga o que a pessoa está digitando nem o aviso de senha incorreta.
+    if (jaVisivel && !incorreta) return;
+    $('#campo-token').value = '';
+    $('#campo-token').focus();
+  }
+
+  function mostrarErroRede(erro) {
+    $('#erro-rede').classList.toggle('oculto', !erro);
+    $('#erro-rede-detalhe').textContent = erro ? (erro.message === 'Failed to fetch' ? 'O servidor não respondeu.' : erro.message) : '';
+    $('#conteudo').classList.toggle('desatualizado', !!erro);
+  }
+
+  // O player com mais sessões; empate fica com o mais recente (a lista já vem por último envio).
+  const maisSessoes = (lista) => (lista.length ? lista.reduce((a, b) => (b.sessoes > a.sessoes ? b : a)).player : '');
+
   async function carregar() {
     const meu = ++pedido;
     if (pedeToken === null) {
-      try { pedeToken = (await api('api/config')).token; } catch (e) { pedeToken = false; }
+      try { pedeToken = (await api('api/config')).token; } catch (e) { pedeToken = null; }
+      if (meu !== pedido) return;
     }
-    if (pedeToken && !token()) {
-      $('#conteudo').classList.add('oculto'); $('#vazio').classList.add('oculto');
-      $('#pedir-token').classList.remove('oculto'); $('#erro-token').classList.add('oculto');
-      return;
-    }
+    if (pedeToken && !token()) { mostrarSenha(false); return; }
     try { sessionStorage.setItem('vsl-painel', JSON.stringify(estado)); } catch (e) { /* ignora */ }
     document.querySelectorAll('.periodos button').forEach((b) => b.setAttribute('aria-pressed', b.dataset.periodo === estado.periodo ? 'true' : 'false'));
+    $('#filtros').classList.remove('oculto');
+    if (ultimo === null) renderEsqueleto();
     $('#conteudo').classList.add('carregando');
     try {
-      const [players, resumo] = await Promise.all([api('api/players'), api('api/resumo', Object.assign({ player: estado.player }, filtros()))]);
+      let lista = null;
+      if (estado.player === null) { // primeira abertura: escolhe o player com mais sessões
+        lista = (await api('api/players')).players;
+        if (meu !== pedido) return;
+        estado.player = maisSessoes(lista);
+      }
+      const [players, resumo] = await Promise.all([lista ? { players: lista } : api('api/players'), api('api/resumo', parametros())]);
       if (meu !== pedido) return; // chegou um pedido mais novo enquanto este esperava
       $('#pedir-token').classList.add('oculto');
       $('#sem-token').classList.toggle('oculto', pedeToken !== false);
+      $('#sair').classList.toggle('oculto', !(pedeToken && token()));
       if (!preencherPlayers(players.players)) { carregar(); return; } // o player filtrado sumiu: recarrega sem filtro
       ultimo = resumo;
+      mostrarErroRede(null);
       preencherDatas(resumo.de, resumo.ate);
       render(resumo, players.players);
       $('#atualizado').textContent = 'atualizado às ' + new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
     } catch (erro) {
       if (meu !== pedido) return;
       if (erro.token) {
-        $('#conteudo').classList.add('oculto'); $('#vazio').classList.add('oculto');
-        $('#pedir-token').classList.remove('oculto');
-        $('#erro-token').classList.toggle('oculto', !token());
+        // tinha uma senha guardada e o servidor recusou: pede de novo e avisa
+        const tinha = !!token();
+        esquecerToken();
+        mostrarSenha(tinha);
       } else {
-        $('#atualizado').textContent = 'erro ao carregar: ' + erro.message;
+        mostrarErroRede(erro);
       }
     } finally {
       if (meu === pedido) $('#conteudo').classList.remove('carregando');
@@ -371,20 +544,39 @@
     sel.replaceChildren(texto('option', 'Todos os players', { value: '' }));
     lista.forEach((p) => sel.appendChild(texto('option', p.player + ' (' + fmtN.format(p.sessoes) + ')', { value: p.player })));
     if (estado.player && !lista.some((p) => p.player === estado.player)) { estado.player = ''; return false; }
-    sel.value = estado.player;
+    sel.value = estado.player || '';
     return true;
   }
 
-  // CSV: baixa com o token no cabeçalho, para ele não ir parar na URL nem no histórico.
+  // O <select> de navegador: a lista conhecida mais o que o servidor já mostrou sem filtro.
+  function preencherNavegadores(r) {
+    if (!r.navegador) (r.navegadores || []).forEach((g) => navegadoresVistos.add(g.nome));
+    const nomes = NAVEGADORES.concat([...navegadoresVistos].filter((n) => !NAVEGADORES.includes(n)));
+    if (estado.navegador && !nomes.includes(estado.navegador)) nomes.push(estado.navegador);
+    const sel = $('#navegador');
+    sel.replaceChildren(texto('option', 'Todos os navegadores', { value: '' }), ...nomes.map((n) => texto('option', n, { value: n })));
+    sel.value = estado.navegador;
+    $('#chip-navegador').classList.toggle('oculto', !estado.navegador);
+    $('#chip-navegador-texto').textContent = estado.navegador ? 'Navegador: ' + estado.navegador : '';
+  }
+
+  function aplicarNavegador(nome) {
+    estado.navegador = estado.navegador === nome ? '' : (nome || '');
+    carregar();
+  }
+
+  // CSV: baixa com o token no cabeçalho, para ele não ir parar na URL nem no histórico. Leva os mesmos filtros do resumo.
   async function baixarCsv() {
     const url = new URL('api/sessoes.csv', location.href);
-    Object.entries(Object.assign({ player: estado.player }, filtros())).forEach(([k, v]) => { if (v) url.searchParams.set(k, v); });
-    const resp = await fetch(url, { headers: token() ? { 'X-Token': token() } : {} });
+    Object.entries(parametros()).forEach(([k, v]) => { if (v) url.searchParams.set(k, v); });
+    let resp;
+    try { resp = await fetch(url, { headers: token() ? { 'X-Token': token() } : {} }); } catch (e) { $('#atualizado').textContent = 'erro ao exportar: o servidor não respondeu'; return; }
     if (!resp.ok) { $('#atualizado').textContent = 'erro ao exportar: HTTP ' + resp.status; return; }
     const blob = await resp.blob();
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = 'sessoes-' + (estado.player || 'todos').replace(/[^A-Za-z0-9._-]+/g, '_') + '.csv';
+    const seguro = (t) => t.replace(/[^A-Za-z0-9._-]+/g, '_');
+    a.download = 'sessoes-' + seguro(estado.player || 'todos') + (estado.navegador ? '-' + seguro(estado.navegador) : '') + '.csv';
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 10000);
   }
@@ -394,16 +586,25 @@
     const vazio = !(players || []).some((p) => p.sessoes > 0);
     $('#vazio').classList.toggle('oculto', !vazio);
     $('#conteudo').classList.toggle('oculto', vazio);
+    $('#conteudo').classList.remove('inicial');
     if (vazio) {
       $('#snippet').textContent = '<div class="vsl-player"\n     data-src="https://seu-cdn.com/vsl.mp4"\n     data-analytics="' + location.origin + '/vsl"></div>';
       return;
     }
+    const poucos = r.amostra && r.amostra.pequena;
+    $('#poucos-plays').classList.toggle('oculto', !poucos);
+    $('#poucos-plays').textContent = poucos ? 'Poucos plays (' + fmtN.format(r.amostra.plays) + '): os números ainda são ruído.' : '';
+    renderFunil(r);
     renderKpis(r);
     renderRetencao(r);
     renderDias(r);
     renderGrupos('#origens', r.origens, 'Origem');
     renderGrupos('#dispositivos', r.dispositivos, 'Dispositivo');
+    renderGrupos('#navegadores', r.navegadores, 'Navegador', { filtrar: aplicarNavegador, ativo: estado.navegador });
+    renderGrupos('#criativos', r.criativos, 'Criativo');
+    renderGrupos('#campanhas', r.campanhas, 'Campanha');
     renderEventos(r.eventos);
+    preencherNavegadores(r);
   }
 
   function tile(rotulo, valor, detalhe) {
@@ -415,6 +616,62 @@
     return el;
   }
 
+  // Primeiro carregamento: blocos cinza no lugar do funil e dos tiles, até a primeira resposta chegar.
+  function renderEsqueleto() {
+    const c = $('#conteudo');
+    c.classList.remove('oculto'); c.classList.add('inicial');
+    $('#funil').replaceChildren(...['Visitas', 'Plays', 'Pitch', 'Cliques'].map((nome) => etapaFunil(nome, 0, 1, '', '')));
+    $('#funil-card').classList.add('esqueleto');
+    $('#erros').textContent = '';
+    $('#kpis').replaceChildren(...Array.from({ length: 6 }, () => { const t = tile(' ', ' ', ' '); t.classList.add('esqueleto'); t.setAttribute('aria-hidden', 'true'); return t; }));
+  }
+
+  function etapaFunil(nome, n, max, valor, legenda) {
+    const linha = document.createElement('div');
+    linha.className = 'etapa';
+    linha.appendChild(texto('span', nome, { class: 'etapa-nome' }));
+    const barra = document.createElement('div'); barra.className = 'etapa-barra';
+    const cheio = document.createElement('div'); cheio.className = 'etapa-preenchido';
+    cheio.style.width = (max ? Math.max(0, Math.min(1, n / max)) * 100 : 0) + '%';
+    barra.appendChild(cheio);
+    linha.appendChild(barra);
+    const num = document.createElement('span'); num.className = 'etapa-num';
+    num.appendChild(texto('strong', valor));
+    if (legenda) num.appendChild(texto('small', legenda));
+    linha.appendChild(num);
+    return linha;
+  }
+
+  // Funil: Visitas → Plays → Pitch → Cliques, cada barra com o número e a % em relação à etapa anterior.
+  function renderFunil(r) {
+    const f = r.funil || { visitas: r.sessoes, plays: r.plays, pitch: r.chegaram_pitch, cliques: r.cliques || 0 };
+    const etapas = [
+      ['Visitas', f.visitas, null, ''],
+      ['Plays', f.plays, f.visitas, 'das visitas'],
+      ['Pitch', f.pitch, f.plays, 'dos plays'],
+      ['Cliques', f.cliques, f.pitch, 'de quem chegou ao pitch'],
+    ];
+    const max = Math.max(1, f.visitas);
+    $('#funil-card').classList.remove('esqueleto');
+    $('#funil').replaceChildren(...etapas.map(([nome, n, anterior, de]) =>
+      etapaFunil(nome, n, max, fmtN.format(n), anterior == null ? '' : (anterior ? fmtPct(n / anterior) : '—') + ' ' + de)));
+    const ruim = (r.taxa_erro || 0) > ERRO_RUIM;
+    const selo = $('#erros');
+    selo.textContent = (ruim ? '⚠ ' : '') + 'Erros: ' + fmtN.format(r.erros || 0) + ' (' + fmtPct(r.taxa_erro) + ')';
+    selo.title = 'Sessões em que o vídeo deu erro';
+    selo.classList.toggle('ruim', ruim);
+  }
+
+  // Cliques no botão: o número é o total de sessões que clicaram; a taxa é só de quem chegou ao pitch (com som), a
+  // mesma do funil. Cliques de quem não chegou (sessão muda na tela final, botão liberado por tempo antes do pitch)
+  // ficam avisados à parte, em vez de estourar a taxa acima de 100 %.
+  function legendaCliques(r) {
+    const total = r.cliques || 0;
+    const noPitch = r.cliques_pitch != null ? r.cliques_pitch : total;
+    const fora = total - noPitch;
+    return fmtPct(r.taxa_clique) + ' de quem chegou ao pitch' + (fora > 0 ? ' · ' + fmtN.format(fora) + ' de quem não chegou' : '');
+  }
+
   function renderKpis(r) {
     const temPitch = r.pitch != null || r.pitch_misto;
     const pitchTxt = r.pitch != null ? 'pitch aos ' + fmtTempo(r.pitch) : r.pitch_misto ? 'pitch de cada player' : 'sem data-pitch no player';
@@ -422,9 +679,9 @@
       tile('Visualizações da página', fmtN.format(r.sessoes), fmtN.format(r.visitantes) + ' visitantes únicos'),
       tile('Plays (clicaram para ouvir)', fmtN.format(r.plays), 'taxa de play ' + fmtPct(r.taxa_play)),
       tile('Chegaram ao pitch', temPitch ? fmtN.format(r.chegaram_pitch) : '—', (temPitch ? fmtPct(r.taxa_pitch) + ' dos plays · ' : '') + pitchTxt),
+      tile('Cliques no botão', fmtN.format(r.cliques || 0), legendaCliques(r)),
       tile('Terminaram o vídeo', fmtN.format(r.terminaram), fmtPct(r.taxa_conclusao) + ' dos plays'),
       tile('Tempo médio assistido', fmtTempo(r.tempo_medio), 'mediana ' + fmtTempo(r.tempo_mediano) + ' · ' + fmtPct(r.engajamento, 0) + ' do vídeo'),
-      tile('Duração do vídeo', r.duracao ? fmtTempo(r.duracao) : '—', 'informada pelo player'),
     );
   }
 
@@ -435,11 +692,14 @@
     const pontos = r.retencao.pontos;
     const passo = r.retencao.passo;
     const plays = r.plays;
+    const n = r.curva_n || plays; // plays usados na curva (uma amostra, quando são muitos)
     dica.classList.remove('on');
     alvo.replaceChildren();
-    $('#retencao-sub').textContent = plays
-      ? 'Porcentagem dos ' + fmtN.format(plays) + ' plays que ainda assistiam em cada momento do vídeo.'
-      : 'Ainda não houve plays com som neste período.';
+    const partes = [];
+    partes.push(plays ? 'Porcentagem dos ' + fmtN.format(plays) + ' plays que ainda assistiam em cada momento do vídeo.' : 'Ainda não houve plays com som neste período.');
+    if (r.duracao) partes.push('Vídeo de ' + fmtTempo(r.duracao) + ' (duração informada pelo player).');
+    if (r.curva_amostrada) partes.push('Curva calculada sobre amostra de ' + fmtN.format(n) + ' plays.');
+    $('#retencao-sub').textContent = partes.join(' ');
     if (!plays || pontos.length < 2) { alvo.appendChild(texto('p', 'Sem dados para desenhar.', { class: 'legenda-texto' })); $('#retencao-tabela').replaceChildren(); return; }
 
     const W = Math.max(320, alvo.clientWidth || 800), H = 280;
@@ -448,7 +708,7 @@
     const duracao = (pontos.length - 1) * passo;
     const x = (s) => m.left + (duracao ? s / duracao : 0) * pw;
     const y = (p) => m.top + (1 - p) * ph;
-    const pct = (i) => Math.min(1, pontos[i] / plays);
+    const pct = (i) => Math.min(1, n ? pontos[i] / n : 0);
     const svg = svgEl('svg', { viewBox: '0 0 ' + W + ' ' + H, height: H, role: 'img', tabindex: '0',
       'aria-label': 'Curva de retenção: ' + pontos.length + ' pontos, de 0 até ' + fmtTempo(duracao) });
 
@@ -468,8 +728,12 @@
 
     if (r.pitch != null && r.pitch <= duracao) {
       const i = Math.min(pontos.length - 1, Math.round(r.pitch / passo));
-      svgEl('line', { x1: x(r.pitch), x2: x(r.pitch), y1: m.top - 6, y2: y(0), class: 'marcador' }, svg);
-      svgEl('text', { x: x(r.pitch) + 5, y: m.top - 8, class: 'rotulo-direto' }, svg).textContent = 'Pitch ' + fmtTempo(r.pitch) + ' · ' + fmtPct(pct(i), 0);
+      const px = x(r.pitch);
+      const direita = px > W - m.right - 170; // perto do fim, o rótulo fica à esquerda da linha
+      svgEl('line', { x1: px, x2: px, y1: m.top - 6, y2: y(0), class: 'marcador' }, svg);
+      // O número é o mesmo do tile "Chegaram ao pitch" (taxa_pitch), não a leitura da curva naquele segundo.
+      svgEl('text', { x: px + (direita ? -5 : 5), y: m.top - 8, class: 'rotulo-direto', 'text-anchor': direita ? 'end' : 'start' }, svg).textContent =
+        'Pitch ' + fmtTempo(r.pitch) + ' · ' + fmtPct(r.taxa_pitch, 0) + ' chegaram';
       svgEl('circle', { cx: x(i * passo), cy: y(pct(i)), r: 4, class: 'ponto' }, svg);
     }
     const fim = coords[coords.length - 1];
@@ -491,7 +755,7 @@
       const l = document.createElement('div'); l.className = 'linha-dica';
       l.appendChild(texto('span', '', { class: 'chave', style: 'background: var(--series-1)' }));
       l.appendChild(texto('strong', fmtPct(pct(indice))));
-      l.appendChild(texto('span', fmtN.format(Math.round(pontos[indice])) + ' de ' + fmtN.format(plays) + ' plays'));
+      l.appendChild(texto('span', fmtN.format(Math.round(pontos[indice])) + ' de ' + fmtN.format(n) + ' plays'));
       dica.appendChild(l);
       dica.classList.add('on');
       const caixa = alvo.getBoundingClientRect();
@@ -574,8 +838,8 @@
         coluna(cx, d.sessoes, 'barra-1'); // com muitos dias, os plays ficam sobrepostos às visualizações
         coluna(cx, d.plays, 'barra-2');
       }
-      const ultimo = i === dias.length - 1;
-      if (ultimo || (i % cadaRotulo === 0 && dias.length - 1 - i >= cadaRotulo)) { // o penúltimo rótulo só entra se houver espaço antes do último
+      const ultimoDia = i === dias.length - 1;
+      if (ultimoDia || (i % cadaRotulo === 0 && dias.length - 1 - i >= cadaRotulo)) { // o penúltimo rótulo só entra se houver espaço antes do último
         svgEl('text', { x: cx, y: H - m.bottom + 18, 'text-anchor': 'middle' }, svg).textContent = fmtDia(d.dia);
       }
     });
@@ -622,36 +886,59 @@
     $('#dias-tabela').replaceChildren(tabela);
   }
 
-  function renderGrupos(sel, grupos, titulo) {
+  // Tabela de grupos (origens, dispositivos, navegadores, criativos, campanhas). Com `opcoes.filtrar`, clicar numa linha
+  // (ou no nome, pelo teclado) aplica o filtro; `opcoes.ativo` é o nome filtrado no momento.
+  function renderGrupos(sel, grupos, titulo, opcoes) {
+    opcoes = opcoes || {};
     const tabela = document.createElement('table');
     const cab = tabela.createTHead().insertRow();
-    [titulo, 'Visualizações', 'Plays', 'Taxa de play', 'Pitch', 'Terminaram'].forEach((h, i) => cab.appendChild(texto('th', h, i ? { class: 'num' } : {})));
+    [titulo, 'Visitas', 'Plays', 'Taxa de play', 'Pitch', 'Cliques', 'Terminaram'].forEach((h, i) => cab.appendChild(texto('th', h, i ? { class: 'num' } : {})));
     const corpo = tabela.createTBody();
-    grupos.forEach((g) => {
+    (grupos || []).forEach((g) => {
       const tr = corpo.insertRow();
-      tr.appendChild(texto('td', g.nome));
+      const nome = tr.insertCell();
+      if (opcoes.filtrar) {
+        const ativo = opcoes.ativo === g.nome;
+        tr.className = 'clicavel' + (ativo ? ' ativa' : '');
+        nome.appendChild(texto('button', g.nome, { type: 'button', class: 'filtrar', 'aria-pressed': ativo ? 'true' : 'false',
+          title: ativo ? 'Tirar o filtro' : 'Ver só ' + g.nome }));
+        tr.addEventListener('click', () => opcoes.filtrar(g.nome));
+      } else {
+        nome.textContent = g.nome;
+      }
       tr.appendChild(texto('td', fmtN.format(g.sessoes), { class: 'num' }));
       tr.appendChild(texto('td', fmtN.format(g.plays), { class: 'num' }));
       tr.appendChild(texto('td', g.sessoes ? fmtPct(g.plays / g.sessoes) : '—', { class: 'num' }));
       tr.appendChild(texto('td', g.plays ? fmtN.format(g.pitch) + ' (' + fmtPct(g.pitch / g.plays, 0) + ')' : '—', { class: 'num' }));
+      const cliques = g.cliques || 0;
+      const cliquesPitch = g.cliques_pitch != null ? g.cliques_pitch : cliques; // a % é só de quem chegou ao pitch (nunca passa de 100 %)
+      const fora = cliques - cliquesPitch;
+      const attrsCliques = { class: 'num' };
+      if (g.pitch) attrsCliques.title = fmtN.format(cliquesPitch) + ' de ' + fmtN.format(g.pitch) + ' que chegaram ao pitch clicaram' + (fora > 0 ? '; ' + fmtN.format(fora) + ' clique(s) de quem não chegou ao pitch' : '');
+      tr.appendChild(texto('td', cliques ? fmtN.format(cliques) + (g.pitch ? ' (' + fmtPct(cliquesPitch / g.pitch, 0) + ')' : '') : '0', attrsCliques));
       tr.appendChild(texto('td', g.plays ? fmtN.format(g.terminaram) + ' (' + fmtPct(g.terminaram / g.plays, 0) + ')' : '—', { class: 'num' }));
     });
-    $(sel).replaceChildren(grupos.length ? tabela : texto('p', 'Sem dados no período.', { class: 'legenda-texto' }));
+    $(sel).replaceChildren(grupos && grupos.length ? tabela : texto('p', 'Sem dados no período.', { class: 'legenda-texto' }));
   }
 
   function renderEventos(eventos) {
     const tabela = document.createElement('table');
     const cab = tabela.createTHead().insertRow();
-    ['Evento', 'Código', 'Vezes', 'Sessões'].forEach((h, i) => cab.appendChild(texto('th', h, i > 1 ? { class: 'num' } : {})));
+    ['Evento', 'Vezes', 'Sessões'].forEach((h, i) => cab.appendChild(texto('th', h, i ? { class: 'num' } : {})));
     const corpo = tabela.createTBody();
-    eventos.forEach((e) => {
+    (eventos || []).forEach((e) => {
       const tr = corpo.insertRow();
-      tr.appendChild(texto('td', Object.hasOwn(NOMES_EVENTOS, e.tipo) ? NOMES_EVENTOS[e.tipo] : 'Evento seu'));
-      tr.appendChild(texto('td', e.tipo));
+      const nome = tr.insertCell();
+      if (Object.prototype.hasOwnProperty.call(NOMES_EVENTOS, e.tipo)) {
+        nome.appendChild(document.createTextNode(NOMES_EVENTOS[e.tipo]));
+        nome.appendChild(texto('code', e.tipo));
+      } else {
+        nome.appendChild(texto('code', e.tipo));
+      }
       tr.appendChild(texto('td', fmtN.format(e.total), { class: 'num' }));
       tr.appendChild(texto('td', fmtN.format(e.sessoes), { class: 'num' }));
     });
-    $('#eventos').replaceChildren(eventos.length ? tabela : texto('p', 'Sem eventos no período.', { class: 'legenda-texto' }));
+    $('#eventos').replaceChildren(eventos && eventos.length ? tabela : texto('p', 'Sem eventos no período.', { class: 'legenda-texto' }));
   }
 
   // ---------------------------------------------------------------- controles
@@ -668,16 +955,32 @@
   });
   $('#csv').addEventListener('click', (e) => { e.preventDefault(); baixarCsv(); });
   $('#player').addEventListener('change', (e) => { estado.player = e.target.value; carregar(); });
+  $('#navegador').addEventListener('change', (e) => { estado.navegador = e.target.value; carregar(); });
+  $('#tirar-navegador').addEventListener('click', () => aplicarNavegador(''));
   $('#recarregar').addEventListener('click', carregar);
+  $('#tentar').addEventListener('click', carregar);
   document.querySelectorAll('[data-tabela]').forEach((b) => b.addEventListener('click', () => {
     const fig = document.getElementById(b.dataset.tabela);
     const modo = fig.classList.toggle('modo-tabela');
     b.textContent = modo ? 'Ver gráfico' : 'Ver tabela';
   }));
+  $('#toggle-eventos').addEventListener('click', () => {
+    const aberto = $('#card-eventos').classList.toggle('oculto') === false;
+    $('#toggle-eventos').setAttribute('aria-expanded', aberto ? 'true' : 'false');
+    $('#toggle-eventos').textContent = aberto ? 'Ocultar eventos técnicos' : 'Mostrar eventos técnicos';
+  });
   $('#form-token').addEventListener('submit', (e) => {
     e.preventDefault();
-    try { sessionStorage.setItem('vsl-token', $('#campo-token').value.trim()); } catch (err) { /* ignora */ }
+    const senha = $('#campo-token').value.trim();
+    if (!senha) return;
+    guardarToken(senha, $('#lembrar').checked);
+    $('#erro-token').classList.add('oculto');
     carregar();
+  });
+  $('#sair').addEventListener('click', () => {
+    esquecerToken();
+    ultimo = null;
+    mostrarSenha(false);
   });
   let redesenho = null;
   new ResizeObserver(() => {
@@ -685,7 +988,7 @@
     redesenho = setTimeout(() => { if (ultimo) { renderRetencao(ultimo); renderDias(ultimo); } }, 150);
   }).observe($('#conteudo'));
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') carregar(); });
-  timer = setInterval(() => { if (document.visibilityState === 'visible') carregar(); }, 60000);
+  setInterval(() => { if (document.visibilityState === 'visible') carregar(); }, ATUALIZAR_A_CADA);
 
   carregar();
 })();

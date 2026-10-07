@@ -533,6 +533,10 @@ class Banco:
         engajamentos = [min(1.0, s["segundos"] / s["duracao"]) for s in plays if s["duracao"] > 0]
 
         cliques = sum(s["clicou"] for s in sessoes)
+        # Só os cliques de quem chegou ao pitch (com som) entram no funil e na taxa: assim o funil é decrescente e a
+        # taxa nunca passa de 100 %. Um clique de sessão muda (tela final de um autoplay, botão da página liberado
+        # por tempo) ou antes do pitch continua contando em `cliques`.
+        cliques_pitch = sum(s["clicou"] for s in chegaram_pitch)
         erros = sum(s["errou"] for s in sessoes)
 
         passo, pontos = compactar_curva(curva_retencao(listas, duracao))
@@ -551,24 +555,27 @@ class Banco:
                     por_dia.setdefault(d.isoformat(), {"dia": d.isoformat(), "sessoes": 0, "plays": 0})
                     d += timedelta(days=1)
 
-        # Tabelas por origem, dispositivo, navegador, criativo e campanha: {nome, sessoes, plays, pitch, terminaram, cliques}.
+        # Tabelas por origem, dispositivo, navegador, criativo e campanha:
+        # {nome, sessoes, plays, pitch, terminaram, cliques, cliques_pitch} (cliques_pitch: cliques de quem chegou ao pitch).
         # `vazio` é o nome mostrado quando a coluna está em branco; acima de `limite` grupos, o resto vira "outras".
-        chaves_grupo = ("sessoes", "plays", "pitch", "terminaram", "cliques")
+        chaves_grupo = ("sessoes", "plays", "pitch", "terminaram", "cliques", "cliques_pitch")
 
         def agrupar(chave: str, limite: int | None = None, vazio: str = "") -> list[dict]:
             grupos: dict[str, dict] = {}
             for s in sessoes:
                 nome = s[chave] or vazio
                 g = grupos.setdefault(nome, {"nome": nome, "sessoes": 0, "plays": 0, "pitch": 0, "terminaram": 0,
-                                             "cliques": 0})
+                                             "cliques": 0, "cliques_pitch": 0})
                 g["sessoes"] += 1
                 g["plays"] += s["com_som"]
                 g["pitch"] += 1 if chegou(s) else 0
                 g["terminaram"] += 1 if (s["com_som"] and s["terminou"]) else 0
                 g["cliques"] += s["clicou"]
+                g["cliques_pitch"] += s["clicou"] if chegou(s) else 0
             lista = sorted(grupos.values(), key=lambda g: (-g["sessoes"], g["nome"]))
             if limite and len(lista) > limite:
-                resto = {"nome": "outras", "sessoes": 0, "plays": 0, "pitch": 0, "terminaram": 0, "cliques": 0}
+                resto = {"nome": "outras", "sessoes": 0, "plays": 0, "pitch": 0, "terminaram": 0, "cliques": 0,
+                         "cliques_pitch": 0}
                 for g in lista[limite:]:
                     for k in chaves_grupo:
                         resto[k] += g[k]
@@ -594,10 +601,12 @@ class Banco:
             "terminaram": len(terminaram),
             "taxa_conclusao": round(len(terminaram) / len(plays), 4) if plays else 0,
             "cliques": cliques,
-            "taxa_clique": round(cliques / len(chegaram_pitch), 4) if chegaram_pitch else 0,
+            "cliques_pitch": cliques_pitch,
+            "taxa_clique": round(cliques_pitch / len(chegaram_pitch), 4) if chegaram_pitch else 0,
             "erros": erros,
             "taxa_erro": round(erros / len(sessoes), 4) if sessoes else 0,
-            "funil": {"visitas": len(sessoes), "plays": len(plays), "pitch": len(chegaram_pitch), "cliques": cliques},
+            "funil": {"visitas": len(sessoes), "plays": len(plays), "pitch": len(chegaram_pitch),
+                      "cliques": cliques_pitch},
             "amostra": {"plays": len(plays), "pequena": len(plays) < PLAYS_POUCOS},
             "tempo_medio": round(statistics.fmean(tempos), 1) if tempos else 0,
             "tempo_mediano": round(statistics.median(tempos), 1) if tempos else 0,

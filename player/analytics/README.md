@@ -54,9 +54,9 @@ Depois aponte o DNS de `analytics.seusite.com` para o servidor. Para manter o pr
 | **Plays** | sessões em que a pessoa clicou para ouvir (evento `unmute`). A taxa de play é plays ÷ visualizações. |
 | **Chegaram ao pitch** | plays que, com som, passaram do tempo definido em `data-pitch` do player daquela sessão. Em "Todos os players" cada sessão é julgada pelo pitch do seu player. Dá para forçar outro tempo com `?pitch=750` na API. |
 | **Terminaram o vídeo** | plays que receberam o evento `ended`. |
-| **Cliques no botão** | sessões com pelo menos um evento `cta_click` (o player emite ao clicar no botão da miniatura de pausa ou da tela final; `emit('cta_click')` também conta). A taxa (`taxa_clique`) é cliques ÷ chegaram ao pitch. |
+| **Cliques no botão** | sessões com pelo menos um evento `cta_click` (o player emite ao clicar no botão da miniatura de pausa ou da tela final; `emit('cta_click')` também conta). A taxa (`taxa_clique`) é `cliques_pitch` ÷ chegaram ao pitch, onde `cliques_pitch` são só os cliques de quem chegou ao pitch com som: um clique de sessão muda (autoplay que foi até o fim e clicou na tela final) ou antes do pitch (botão liberado por tempo) conta em `cliques`, mas não na taxa nem no funil, que assim nunca passam de 100 %. O painel mostra esses cliques à parte ("N de quem não chegou"). |
 | **Erros** | sessões com pelo menos um evento `error` (o vídeo não carregou, mesmo depois das retentativas). A taxa (`taxa_erro`) é erros ÷ visualizações. |
-| **Funil** | visitas (sessões) → plays → pitch (chegaram ao pitch) → cliques, os mesmos números acima em sequência. |
+| **Funil** | visitas (sessões) → plays → pitch (chegaram ao pitch) → cliques (`cliques_pitch`, só de quem chegou ao pitch), cada etapa contida na anterior. |
 | **Tempo médio assistido** | média (e mediana) dos segundos assistidos com som por play, contando cada segundo uma só vez e nunca além da duração. |
 | **Curva de retenção** | para cada segundo do vídeo, a porcentagem dos plays que o assistiu com som. Vídeos longos são compactados em até 1.200 pontos. Quando o período tem mais de 2.000 plays, a curva é calculada sobre uma amostra aleatória de 2.000 (`curva_amostrada: true`, `curva_n` é o tamanho da amostra); os demais números continuam exatos. |
 | **Por dia** | visualizações e plays por dia da primeira chegada da sessão. Os períodos prontos do painel (hoje, 7, 30 e 90 dias) são calculados pelo relógio do servidor, o mesmo que carimba as sessões. |
@@ -67,7 +67,8 @@ Depois aponte o DNS de `analytics.seusite.com` para o servidor. Para manter o pr
 | **Eventos** | contagem de todos os eventos recebidos, inclusive os seus: `VSLPlayer.get('id').emit('cta_click')` registra cliques no botão, por exemplo. |
 
 Origens, dispositivos, navegadores, criativos e campanhas têm as mesmas colunas: sessões, plays, chegaram ao
-pitch, terminaram e cliques. Com menos de 30 plays no período, a API devolve `amostra.pequena: true` e o painel
+pitch, terminaram, cliques e `cliques_pitch` (a porcentagem de cliques nas tabelas do painel usa este último, sobre
+quem chegou ao pitch). Com menos de 30 plays no período, a API devolve `amostra.pequena: true` e o painel
 avisa que os números ainda são ruído.
 
 Só conta o que foi visto com som: o trecho do autoplay mudo entra em *Visualizações*, mas não na retenção,
@@ -91,11 +92,11 @@ aceita. `/vsl`, `/saude` e `/api/config` são públicas.
 | `GET /saude` | `{"ok": true}`. |
 
 Campos do JSON de `/api/resumo`: `sessoes`, `visitantes`, `plays`, `taxa_play`, `chegaram_pitch`, `taxa_pitch`,
-`terminaram`, `taxa_conclusao`, `cliques`, `taxa_clique`, `erros`, `taxa_erro`,
+`terminaram`, `taxa_conclusao`, `cliques`, `cliques_pitch`, `taxa_clique`, `erros`, `taxa_erro`,
 `funil {visitas, plays, pitch, cliques}`, `amostra {plays, pequena}`, `tempo_medio`, `tempo_mediano`,
 `engajamento`, `duracao`, `pitch`, `pitch_misto`, `retencao {passo, pontos}`, `curva_amostrada`, `curva_n`,
 `por_dia`, `origens`, `dispositivos`, `navegadores`, `criativos`, `campanhas` (listas de
-`{nome, sessoes, plays, pitch, terminaram, cliques}`), `eventos`, e os filtros usados (`player`, `navegador`,
+`{nome, sessoes, plays, pitch, terminaram, cliques, cliques_pitch}`), `eventos`, e os filtros usados (`player`, `navegador`,
 `periodo`, `de`, `ate`, `hoje`).
 
 ## Limites e segurança

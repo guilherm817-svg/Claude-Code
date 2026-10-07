@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Analytics do VSL Player em um Cloudflare Worker com banco D1",
   "scripts": {
-    "deploy": "wrangler deploy && wrangler d1 migrations apply DB --remote",
+    "deploy": "wrangler d1 migrations apply DB --remote && wrangler deploy",
     "dev": "wrangler d1 migrations apply DB --local && wrangler dev",
     "test": "node --test teste/worker.test.js"
   },
