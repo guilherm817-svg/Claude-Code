@@ -103,6 +103,24 @@ def test_trecho_sai_com_audio_e_video_juntos(marcados, tmp_path, clipe, entrada)
     assert bipes == pytest.approx(esperado, abs=0.005)
 
 
+@pytest.mark.parametrize("entrada", [0.0, 0.1])
+def test_trecho_que_comeca_antes_do_video_nao_sai_mudo(tmp_path, entrada):
+    """No MP4 em que o vídeo entra depois do áudio (edição vazia no começo do vídeo), a busca pela entrada punha o
+    áudio no primeiro quadro-chave do vídeo: o som de antes dele nunca era lido e o trecho começava mudo, cortando
+    a primeira sílaba de uma fala colada no começo do clipe."""
+    origem = tmp_path / "video_depois.mp4"
+    _gerar("-itsoffset", 0.25, "-f", "lavfi", "-i", "testsrc2=s=180x320:r=24:d=5.75", "-f", "lavfi", "-i",
+           "sine=f=440:d=6,volume=4", "-map", "0:v", "-map", "1:a", "-fps_mode", "passthrough", "-c:v", "libx264",
+           "-pix_fmt", "yuv420p", "-c:a", "aac", origem)
+    assert np.flatnonzero(np.abs(ler_audio(origem)) > 0.05)[0] / TAXA_ANALISE < 0.005  # o som começa no 0
+    saida = tmp_path / "trecho.mov"
+    trecho = exp.Trecho(arquivo=origem, entrada=entrada, duracao=2.0, tem_audio=True)
+    subprocess.run([ffmpeg(), "-v", "error", *exp.comando_trecho(trecho, 180, 320, "24", 24.0, "preencher", saida)],
+                   check=True)
+    som = ler_audio(saida, 48000)
+    assert np.flatnonzero(np.abs(som) > 0.05)[0] / 48000 < exp.FADE_EMENDA  # só o fade da emenda, não 0,17 s mudo
+
+
 def test_ler_audio_fica_no_tempo_do_video(marcados):
     """A fala, a onda e as legendas vêm do ler_audio: o áudio que começa depois do vídeo não pode chegar adiantado."""
     audio = ler_audio(marcados["audio_depois"])
@@ -161,7 +179,9 @@ def test_filtro_de_cor_por_origem(monkeypatch):
     assert "in_color_matrix=auto:" in exp.filtro_cor(Cor(matriz="smpte170m", faixa="tv"))
     hlg = Cor("bt2020nc", "bt2020", "arib-std-b67", "tv")
     monkeypatch.setattr(exp, "filtros", lambda: frozenset({"scale", "zscale", "tonemap"}))
-    assert "tonemap" in exp.filtro_cor(hlg)
+    assert exp.filtro_cor(hlg).startswith("zscale=t=linear")
+    assert exp.filtro_cor(Cor(transferencia="arib-std-b67", faixa="tv")).startswith(
+        "setparams=color_primaries=bt2020:colorspace=bt2020nc,zscale=t=linear")  # só a transferência marcada
     monkeypatch.setattr(exp, "filtros", lambda: frozenset({"scale"}))  # o ffmpeg do Windows pode vir sem a zimg
     assert exp.filtro_cor(hlg) == "scale=in_color_matrix=bt2020:out_color_matrix=bt709:out_range=tv,"
     for cor in (Cor(), hlg):
@@ -180,6 +200,20 @@ def test_hdr_vira_sdr_bt709(cores, tmp_path):
         assert np.abs(quadro - referencia).mean() < 15, nome
         saturacao = (quadro.max(axis=2) - quadro.min(axis=2)).mean() / quadro.mean()
         assert saturacao > 0.7, nome
+
+
+@pytest.mark.parametrize("apagar", ["color_primaries=unknown:colorspace=unknown", "colorspace=unknown",
+                                    "color_primaries=unknown"])
+def test_hdr_sem_a_matriz_ou_as_primarias_marcadas(cores, tmp_path, apagar):
+    """Há HDR com só a transferência marcada: o zscale não tinha de onde converter ("no path between colorspaces")
+    e a exportação inteira falhava. O que falta é lido como BT.2020, o que o HDR usa."""
+    parcial = tmp_path / "parcial.mp4"
+    _gerar("-i", cores["hlg"], "-vf", f"setparams={apagar}", "-c:v", "libx264", "-pix_fmt", "yuv420p10le", parcial)
+    cor = sondar(parcial).cor
+    assert cor.hdr and "" in (cor.matriz, cor.primarias)
+    quadro = _render(parcial, tmp_path / "parcial.mov")
+    assert _cores_do_video(tmp_path / "parcial.mov") == BT709
+    assert np.abs(quadro - _render(cores["hlg"], tmp_path / "hlg.mov")).mean() < 2  # igual ao HLG todo marcado
 
 
 def test_hdr_sem_zscale_ainda_sai_marcado_bt709(cores, tmp_path, monkeypatch):
