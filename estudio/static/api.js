@@ -17,12 +17,14 @@ function mensagemDeErro(dados, status) {
   return status ? `O Estúdio respondeu com erro ${status}.` : 'Sem conexão com o Estúdio. A janela dele ainda está aberta?';
 }
 
-async function pedir(metodo, url, corpo) {
+async function pedir(metodo, url, corpo, { aoSair = false } = {}) {
   const opcoes = { method: metodo, headers: metodo === 'GET' ? {} : { ...CABECALHO } };
   if (corpo !== undefined) {
     opcoes.headers['Content-Type'] = 'application/json';
     opcoes.body = JSON.stringify(corpo);
   }
+  // Com a página fechando, só um pedido "keepalive" chega ao servidor, e o navegador limita o tamanho dele (64 KB).
+  if (aoSair && new Blob([opcoes.body || '']).size < 60000) opcoes.keepalive = true;
   let resposta;
   try {
     resposta = await fetch(url, opcoes);
@@ -54,9 +56,12 @@ function enviarArquivo(projetoId, arquivo, aoProgresso) {
   });
 }
 
-// O que a tela pode alterar num projeto (o resto é do servidor).
-export function ajustesDe(projeto) {
-  const { nome, formato, enquadramento, igualar_volume, linha, legendas_ativas, idioma_legenda, estilo_legenda, legendas } = projeto;
+// O que a tela pode alterar num projeto (o resto é do servidor). As legendas dos clipes em `semLegendas` não vão:
+// o servidor mantém as que tem deles.
+export function ajustesDe(projeto, semLegendas = []) {
+  const { nome, formato, enquadramento, igualar_volume, linha, legendas_ativas, idioma_legenda, estilo_legenda } = projeto;
+  const legendas = { ...projeto.legendas };
+  for (const midiaId of semLegendas) delete legendas[midiaId];
   return { nome, formato, enquadramento, igualar_volume, linha, legendas_ativas, idioma_legenda, estilo_legenda, legendas };
 }
 
@@ -65,7 +70,9 @@ export const api = {
   listar: () => pedir('GET', '/api/projetos'),
   abrir: (id) => pedir('GET', `/api/projetos/${id}`),
   criar: (nome) => enfileirar(() => pedir('POST', '/api/projetos', { nome })),
-  salvar: (projeto) => enfileirar(() => pedir('PUT', `/api/projetos/${projeto.id}`, ajustesDe(projeto))),
+  // semLegendasDe() é chamada na hora do envio, que pode esperar na fila.
+  salvar: (projeto, { semLegendasDe = () => [], aoSair = false } = {}) => enfileirar(
+    () => pedir('PUT', `/api/projetos/${projeto.id}`, ajustesDe(projeto, semLegendasDe()), { aoSair })),
   excluir: (id) => enfileirar(() => pedir('DELETE', `/api/projetos/${id}`)),
   importar: (id, arquivo, aoProgresso) => enfileirar(() => enviarArquivo(id, arquivo, aoProgresso)),
   removerMidia: (id, midiaId) => enfileirar(() => pedir('DELETE', `/api/projetos/${id}/midias/${midiaId}`)),
@@ -77,6 +84,7 @@ export const api = {
   abrirPasta: (id) => pedir('POST', `/api/projetos/${id}/abrir-pasta`),
   transcrever: (id, midias, refazer) => enfileirar(() => pedir('POST', `/api/projetos/${id}/legendas`, { midias, refazer })),
   transcricao: (trabalhoId) => pedir('GET', `/api/legendas/${trabalhoId}`),
+  transcricaoEmAndamento: (id) => pedir('GET', `/api/projetos/${id}/legendas`),
   sobreLegendas: () => pedir('GET', '/api/legendas'),
   urlArquivo: (id, midiaId) => `/api/projetos/${id}/midias/${midiaId}/arquivo`,
   urlTira: (id, midiaId) => `/api/projetos/${id}/midias/${midiaId}/tira.jpg`,

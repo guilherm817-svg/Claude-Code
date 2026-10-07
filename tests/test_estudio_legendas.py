@@ -6,6 +6,7 @@ import re
 import shutil
 import struct
 import subprocess
+import threading
 import time
 from pathlib import Path
 
@@ -396,6 +397,51 @@ def test_api_transcreve_em_segundo_plano(cliente, clipes, whisper):
     assert cliente.post(f"/api/projetos/{pid}/legendas", json={"midias": ["d" * 12]},
                         headers=CABECALHO).status_code == 404
     assert cliente.get("/api/legendas/naoexiste").status_code == 404
+
+
+def test_api_devolve_a_legenda_gravada_e_o_trabalho_em_andamento(cliente, clipes, monkeypatch):
+    """Uma tela que recarrega no meio da transcrição volta a acompanhar o trabalho e recebe, dos clipes já prontos, a
+    legenda como está gravada (com a correção feita depois), e não o texto que saiu do Whisper."""
+    liberar = threading.Event()
+
+    class Segura(WhisperFalso):
+        def transcribe(self, audio, language=None, **opcoes):
+            if self.pedidos:  # o segundo clipe espera
+                liberar.wait(10)
+            return super().transcribe(audio, language, **opcoes)
+
+    falso = Segura("Isso muda tudo agora")
+    monkeypatch.setattr(transcricao, "_carregar_modelo", lambda modelo, dispositivo: falso)
+    pid = cliente.post("/api/projetos", json={}, headers=CABECALHO).json()["id"]
+    primeiro, segundo = _subir(cliente, pid, clipes["falado"]), _subir(cliente, pid, clipes["falado"])
+    assert cliente.get(f"/api/projetos/{pid}/legendas").json() is None
+    trabalho = cliente.post(f"/api/projetos/{pid}/legendas", json={}, headers=CABECALHO).json()
+    try:
+        for _ in range(200):
+            if trabalho["concluidas"]:
+                break
+            time.sleep(0.05)
+            trabalho = cliente.get(f"/api/legendas/{trabalho['id']}").json()
+        assert trabalho["concluidas"] == [primeiro["id"]] and trabalho["pendentes"] == [segundo["id"]]
+
+        projeto = cliente.get(f"/api/projetos/{pid}").json()
+        corrigidas = [{**p, "texto": "mudou"} if p["texto"] == "muda" else p for p in projeto["legendas"][primeiro["id"]]]
+        r = cliente.put(f"/api/projetos/{pid}", json={**{k: projeto[k] for k in ("nome", "linha")},
+                                                      "legendas": {primeiro["id"]: corrigidas}}, headers=CABECALHO)
+        assert r.status_code == 200, r.text
+        andando = cliente.get(f"/api/projetos/{pid}/legendas").json()
+        assert andando["id"] == trabalho["id"] and andando["pendentes"] == [segundo["id"]]
+        assert andando["resultados"] == {primeiro["id"]: corrigidas}
+        assert cliente.get(f"/api/legendas/{trabalho['id']}").json()["resultados"] == {primeiro["id"]: corrigidas}
+        # Pedir de novo (como a tela faz ao abrir o projeto) devolve o mesmo trabalho, também com a correção.
+        de_novo = cliente.post(f"/api/projetos/{pid}/legendas", json={}, headers=CABECALHO).json()
+        assert de_novo["id"] == trabalho["id"] and de_novo["resultados"] == {primeiro["id"]: corrigidas}
+    finally:
+        liberar.set()
+    trabalho = _esperar(cliente, trabalho)
+    assert trabalho["concluidas"] == [primeiro["id"], segundo["id"]]
+    assert [p["texto"] for p in trabalho["resultados"][primeiro["id"]]] == ["Isso", "mudou", "tudo", "agora"]
+    assert cliente.get(f"/api/projetos/{pid}/legendas").json() is None
 
 
 def test_api_recusa_legenda_ruim_em_portugues(cliente, clipes):

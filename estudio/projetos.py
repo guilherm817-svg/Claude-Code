@@ -285,6 +285,11 @@ class Estudio:
             self.salvar(projeto)
             return True
 
+    def legendas_gravadas(self, projeto_id: str) -> dict[str, list[Palavra]]:
+        """As legendas como estão gravadas agora, lidas com a trava (nunca no meio de uma gravação)."""
+        with self._trava:
+            return self.abrir(projeto_id).legendas
+
     # Mídia
 
     def importar(self, projeto_id: str, origem: BinaryIO, nome_original: str) -> tuple[Projeto, Midia, Item]:

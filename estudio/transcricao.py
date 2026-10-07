@@ -173,7 +173,30 @@ class Transcritor:
     def obter(self, trabalho_id: str) -> dict | None:
         with self._trava:
             trabalho = self._trabalhos.get(trabalho_id)
-            return trabalho.como_dict() if trabalho else None
+            dados = trabalho.como_dict() if trabalho else None
+        return self._com_gravadas(dados) if dados else None
+
+    def em_andamento(self, projeto_id: str) -> dict | None:
+        """O trabalho do projeto que ainda está andando, para a tela voltar a acompanhá-lo depois de recarregar."""
+        with self._trava:
+            trabalho = self._ativo_do_projeto(projeto_id)
+            dados = trabalho.como_dict() if trabalho else None
+        return self._com_gravadas(dados) if dados else None
+
+    def _ativo_do_projeto(self, projeto_id: str) -> TrabalhoLegendas | None:
+        return next((t for t in self._trabalhos.values() if t.projeto_id == projeto_id and t.ativo), None)
+
+    def _com_gravadas(self, dados: dict) -> dict:
+        """Troca o resultado de cada mídia concluída pela legenda que está gravada no projeto. Uma tela que recarregou
+        no meio do trabalho recebe as correções feitas depois da transcrição, e não o texto que saiu do Whisper."""
+        if dados["resultados"]:
+            try:
+                gravadas = self.estudio.legendas_gravadas(dados["projeto_id"])
+            except ProjetoNaoEncontrado:
+                gravadas = {}
+            dados["resultados"] = {midia_id: [p.model_dump() for p in gravadas[midia_id]]
+                                   for midia_id in dados["resultados"] if midia_id in gravadas}
+        return dados
 
     def iniciar(self, projeto_id: str, midias: list[str] | None = None, refazer: bool = False,
                 sincrono: bool = False) -> dict:
@@ -190,7 +213,7 @@ class Transcritor:
             alvo = [m for m in alvo if m not in projeto.legendas]
 
         with self._trava:
-            trabalho = next((t for t in self._trabalhos.values() if t.projeto_id == projeto_id and t.ativo), None)
+            trabalho = self._ativo_do_projeto(projeto_id)
             if trabalho:
                 for midia_id in alvo:
                     if midia_id in trabalho.fila:
@@ -199,16 +222,20 @@ class Transcritor:
                         continue
                     trabalho.fila.append(midia_id)
                     trabalho.total += 1
-                return trabalho.como_dict()
-            trabalho = TrabalhoLegendas(id=novo_id(), projeto_id=projeto_id, fila=alvo, total=len(alvo))
-            self._trabalhos[trabalho.id] = trabalho
-            self._esquecer_antigos()
-        if sincrono:
-            self._rodar(trabalho)
-        else:
-            threading.Thread(target=self._rodar, args=(trabalho,), daemon=True).start()
-        with self._trava:
-            return trabalho.como_dict()
+                dados = trabalho.como_dict()
+            else:
+                trabalho = TrabalhoLegendas(id=novo_id(), projeto_id=projeto_id, fila=alvo, total=len(alvo))
+                self._trabalhos[trabalho.id] = trabalho
+                self._esquecer_antigos()
+                dados = None
+        if dados is None:
+            if sincrono:
+                self._rodar(trabalho)
+            else:
+                threading.Thread(target=self._rodar, args=(trabalho,), daemon=True).start()
+            with self._trava:
+                dados = trabalho.como_dict()
+        return self._com_gravadas(dados)
 
     def _esquecer_antigos(self) -> None:
         terminados = [t for t in self._trabalhos.values() if not t.ativo]

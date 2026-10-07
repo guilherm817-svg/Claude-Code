@@ -20,6 +20,11 @@ def criar_rotas_legendas(estudio: Estudio) -> APIRouter:
     def transcrever(projeto_id: str, pedido: PedidoLegendas):
         return transcritor.iniciar(projeto_id, pedido.midias, pedido.refazer)
 
+    @rotas.get("/api/projetos/{projeto_id}/legendas")
+    def em_andamento(projeto_id: str):
+        """O trabalho de transcrição ainda andando no projeto, ou null."""
+        return transcritor.em_andamento(projeto_id)
+
     @rotas.get("/api/legendas/{trabalho_id}")
     def andamento(trabalho_id: str):
         trabalho = transcritor.obter(trabalho_id)

@@ -81,17 +81,22 @@ function instantaneo() {
   return JSON.stringify({ nome, formato, enquadramento, igualar_volume, linha, legendas_ativas, idioma_legenda, estilo_legenda, legendas });
 }
 
+// Guarda no desfazer o estado de antes de uma edição, se algo mudou, e agenda o salvamento.
+function guardarPasso(antes) {
+  if (antes === instantaneo()) return;
+  estado.desfazer.push(antes);
+  if (estado.desfazer.length > 200) estado.desfazer.shift();
+  estado.refazer = [];
+  agendarSalvamento();
+}
+
 function registrar(antes) {
-  if (antes !== instantaneo()) {
-    estado.desfazer.push(antes);
-    if (estado.desfazer.length > 200) estado.desfazer.shift();
-    estado.refazer = [];
-    agendarSalvamento();
-  }
+  guardarPasso(antes);
   atualizar();
 }
 
 function editar(mudanca) {
+  legendas.concluirEdicao(true); // uma correção de legenda sendo digitada vira um passo à parte
   const antes = instantaneo();
   mudanca(estado.projeto);
   registrar(antes);
@@ -108,12 +113,14 @@ function restaurar(texto) {
 }
 
 function desfazer() {
+  legendas.concluirEdicao(true);
   if (!estado.desfazer.length) return;
   estado.refazer.push(instantaneo());
   restaurar(estado.desfazer.pop());
 }
 
 function refazer() {
+  legendas.concluirEdicao(true);
   if (!estado.refazer.length) return;
   estado.desfazer.push(instantaneo());
   restaurar(estado.refazer.pop());
@@ -131,12 +138,12 @@ function agendarSalvamento() {
   estado.salvar.timer = setTimeout(salvarAgora, 400);
 }
 
-async function salvarAgora() {
+async function salvarAgora(aoSair = false) {
   clearTimeout(estado.salvar.timer);
   estado.salvar.timer = null;
   const projeto = estado.projeto;
   try {
-    const salvo = await api.salvar(projeto);
+    const salvo = await api.salvar(projeto, { semLegendasDe: () => legendas.emTranscricao(projeto.id), aoSair });
     projeto.atualizado_em = salvo.atualizado_em;
     estado.salvar.erro = false;
     if (!estado.salvar.timer) mostrarSalvamento('Tudo salvo');
@@ -148,6 +155,7 @@ async function salvarAgora() {
 }
 
 async function garantirSalvo() {
+  legendas.concluirEdicao(); // o que acabou de ser digitado na legenda também vai
   if (estado.salvar.timer || estado.salvar.erro) await salvarAgora();
 }
 
@@ -186,6 +194,7 @@ function aparar(id, lado, valor) {
 }
 
 function comecarEdicao() {
+  legendas.concluirEdicao(true);
   estado.edicao = instantaneo();
 }
 
@@ -326,6 +335,7 @@ async function importar(arquivos) {
         desenharImportacoes();
       });
       if (estado.projeto.id !== projetoId) continue;
+      legendas.concluirEdicao();
       const antes = instantaneo();
       estado.projeto.midias.push(resposta.midia);
       estado.projeto.linha.push(resposta.item);
@@ -375,7 +385,7 @@ function atualizar() {
 function desenharTopo() {
   const nome = $('#nome-projeto');
   if (document.activeElement !== nome) nome.value = estado.projeto.nome;
-  $('#btn-desfazer').disabled = !estado.desfazer.length;
+  $('#btn-desfazer').disabled = !estado.desfazer.length && !legendas.emEdicao();
   $('#btn-refazer').disabled = !estado.refazer.length;
   $('#btn-exportar').disabled = !estado.projeto.linha.length;
 }
@@ -445,9 +455,11 @@ function campoDeCorte(item, lado, rotulo) {
 
 function desenharInspetor() {
   const painel = $('#inspetor');
-  // Redesenhar o painel tiraria o cursor de quem está corrigindo o texto da legenda; ele volta ao sair do campo.
-  if (document.activeElement?.tagName === 'TEXTAREA' && painel.contains(document.activeElement)) return;
   const item = itemSelecionado();
+  // Quem está corrigindo o texto da legenda deste clipe não perde o cursor. Um campo de outro clipe (ou de um que
+  // saiu da linha) encerra a correção e dá lugar à seleção atual.
+  if (legendas.corrigindo(item)) return;
+  legendas.concluirEdicao(true);
   if (!item) {
     painel.replaceChildren(...painelDoProjeto());
     return;
@@ -684,6 +696,7 @@ async function iniciarExportacao() {
 // Projetos
 
 async function abrirProjeto(id) {
+  legendas.concluirEdicao(true); // a correção em andamento é do projeto que está saindo
   await garantirSalvo();
   previa.pausar();
   const projeto = await api.abrir(id);
@@ -691,6 +704,7 @@ async function abrirProjeto(id) {
   estado.selecionado = null;
   estado.desfazer = [];
   estado.refazer = [];
+  estado.edicao = null;
   estado.imagens.clear();
   estado.ondas.clear();
   estado.errosDePrevia.clear();
@@ -827,8 +841,15 @@ const legendas = new Legendas({
   mesclar: (midiaId, palavras) => {
     if (midiaDe(midiaId)) estado.projeto.legendas = { ...estado.projeto.legendas, [midiaId]: palavras };
   },
-  comecarEdicao,
-  terminarEdicao,
+  instantaneo,
+  // Fim de uma correção de texto: só o topo é redesenhado (o clique que tirou o cursor do campo pode ser num botão
+  // do painel, que, trocado, perderia o clique).
+  guardarPasso: (antes) => {
+    guardarPasso(antes);
+    desenharTopo();
+  },
+  desenharTopo,
+  agendarSalvamento,
   garantirSalvo,
   atualizar,
   redesenhar: () => {
@@ -918,11 +939,17 @@ function montarEventos() {
   });
 
   document.addEventListener('keydown', teclado);
-  // Botão clicado com o mouse não fica com o foco: senão o Espaço "clicaria" nele em vez de tocar o vídeo.
-  document.addEventListener('mousedown', (e) => { if (e.target.closest('button')) e.preventDefault(); });
+  // Botão clicado com o mouse não fica com o foco: senão o Espaço "clicaria" nele em vez de tocar o vídeo. Mas ele
+  // encerra a correção de legenda que estava sendo digitada, antes da ação dele.
+  document.addEventListener('mousedown', (e) => {
+    if (!e.target.closest('button')) return;
+    legendas.concluirEdicao(true);
+    e.preventDefault();
+  });
   window.addEventListener('beforeunload', (e) => {
+    legendas.concluirEdicao(); // fechar ou recarregar no meio da digitação não perde a correção
     if (estado.salvar.timer || estado.importando.length || exportacaoAtual) {
-      salvarAgora();
+      salvarAgora(true);
       e.preventDefault();
     }
   });

@@ -45,13 +45,14 @@ function separar(item, palavras) {
 }
 
 export class Legendas {
-  // app: { projeto(), formato(), editar(fn), mesclar(midiaId, palavras), comecarEdicao(), terminarEdicao(),
-  //        garantirSalvo(), atualizar(), redesenhar() }
+  // app: { projeto(), formato(), editar(fn), mesclar(midiaId, palavras), instantaneo(), guardarPasso(antes),
+  //        desenharTopo(), agendarSalvamento(), garantirSalvo(), atualizar(), redesenhar() }
   constructor(app) {
     this.app = app;
     this.trabalho = null;
     this.aplicadas = 0;
     this.acompanhando = false;
+    this.edicao = null; // a correção de texto em andamento: { area, projetoId, itemId, antes, timer, pendente }
     this.cache = new WeakMap();
     this.fonteCarregada = !document.fonts;
     this.tamanhoDoModelo = 'cerca de 1,6 GB';
@@ -109,13 +110,27 @@ export class Legendas {
     return ativo(this.trabalho) && this.trabalho.pendentes.includes(midiaId);
   }
 
+  // Clipes que o trabalho ainda vai transcrever: o salvamento não manda a legenda que a tela tem deles, senão
+  // desfaria no servidor uma transcrição nova que chegou lá e que a tela ainda não buscou.
+  emTranscricao(projetoId) {
+    const t = this.trabalho;
+    return ativo(t) && t.projeto_id === projetoId ? t.pendentes : [];
+  }
+
   // Transcrição em segundo plano
 
-  aoAbrirProjeto(projeto) {
+  async aoAbrirProjeto(projeto) {
     this.trabalho = null;
     this.aplicadas = 0;
+    // Uma transcrição que continuou no servidor enquanto a página recarregava (ou outro projeto estava aberto) volta a
+    // ser acompanhada: senão a tela salvaria o texto antigo por cima do que ela ainda vai gravar.
+    const andando = await api.transcricaoEmAndamento(projeto.id).catch(() => null);
+    if (this.app.projeto() !== projeto) return;
+    if (andando) this._acompanhar(andando);
     // Retoma o que ficou sem legenda (o Estúdio pode ter sido fechado no meio da transcrição).
-    if (projeto.legendas_ativas && projeto.midias.some((m) => !(m.id in projeto.legendas))) this.transcrever(null, false);
+    if (projeto.legendas_ativas && projeto.midias.some((m) => !(m.id in projeto.legendas) && !this.pendente(m.id))) {
+      this.transcrever(null, false);
+    }
   }
 
   aoImportar(midia) {
@@ -165,10 +180,13 @@ export class Legendas {
   }
 
   // As transcrições chegam sem passar pelo desfazer: são dados novos, não uma edição. Devolve quantas chegaram.
+  // O servidor manda a legenda como está gravada, já com as correções feitas depois da transcrição.
   _aplicar(trabalho) {
     if (trabalho.projeto_id !== this.app.projeto().id) return 0;
     const novas = trabalho.concluidas.slice(this.aplicadas);
-    for (const midiaId of novas) this.app.mesclar(midiaId, trabalho.resultados[midiaId]);
+    for (const midiaId of novas) {
+      if (trabalho.resultados[midiaId]) this.app.mesclar(midiaId, trabalho.resultados[midiaId]);
+    }
     this.aplicadas = trabalho.concluidas.length;
     return novas.length;
   }
@@ -297,37 +315,56 @@ export class Legendas {
       }, icone('desfazer', 15), 'Transcrever de novo'));
   }
 
+  // Enquanto se digita, a prévia acompanha e o projeto é salvo; o desfazer guarda a correção inteira como um passo.
   _editorDeTexto(item, midia) {
     const p = this.app.projeto();
     const area = el('textarea', {
       class: 'legenda-texto', rows: 4, spellcheck: 'true', lang: IDIOMA_DO_TEXTO[p.idioma_legenda] || 'pt-BR',
       placeholder: 'Nenhuma fala neste trecho. Escreva aqui para colocar uma legenda.', 'aria-label': 'Texto da legenda deste clipe',
+      'data-item': item.id,
     });
     area.value = separar(item, p.legendas[midia.id] || []).dentro.map((w) => w.texto).join(' ');
-    let timer = null;
-    let editando = false;
-    const aplicar = () => {
-      clearTimeout(timer);
-      timer = null;
-      this._aplicarTexto(item.id, area.value);
-    };
-    // Enquanto digita, a prévia acompanha; o desfazer guarda a edição inteira, ao sair do campo.
     area.addEventListener('input', () => {
-      if (!editando) {
-        editando = true;
-        this.app.comecarEdicao();
+      if (this.edicao?.area !== area) {
+        this.concluirEdicao();
+        this.edicao = { area, projetoId: p.id, itemId: item.id, antes: this.app.instantaneo(), timer: null, pendente: false };
+        this.app.desenharTopo(); // o Desfazer já vale para o que está sendo digitado
       }
-      clearTimeout(timer);
-      timer = setTimeout(aplicar, 250);
+      const edicao = this.edicao;
+      clearTimeout(edicao.timer);
+      edicao.pendente = true;
+      edicao.timer = setTimeout(() => {
+        edicao.pendente = false;
+        this._aplicarTexto(edicao.itemId, area.value);
+      }, 250);
     });
-    area.addEventListener('blur', () => {
-      if (timer) aplicar();
-      if (editando) {
-        editando = false;
-        this.app.terminarEdicao();
-      }
-    });
+    area.addEventListener('blur', () => this.concluirEdicao());
     return area;
+  }
+
+  emEdicao() {
+    return this.edicao !== null;
+  }
+
+  // O campo de texto da legenda deste item está com o cursor: redesenhar o painel tiraria o cursor de quem corrige.
+  corrigindo(item) {
+    const campo = document.activeElement;
+    return Boolean(item) && Boolean(campo?.classList.contains('legenda-texto')) && campo.dataset.item === item.id;
+  }
+
+  // Encerra a correção de texto em andamento: aplica o que ainda não entrou no projeto e guarda o passo do desfazer.
+  // Com `sair`, o campo também perde o cursor, porque outra ação vai mudar o painel (desfazer, tirar o clipe, trocar
+  // de projeto...). Nada é redesenhado aqui: isso roda no clique de um botão, que seria trocado e perderia o clique.
+  concluirEdicao(sair = false) {
+    const edicao = this.edicao;
+    this.edicao = null;
+    if (edicao && edicao.projetoId === this.app.projeto()?.id) {
+      clearTimeout(edicao.timer);
+      if (edicao.pendente) this._aplicarTexto(edicao.itemId, edicao.area.value);
+      this.app.guardarPasso(edicao.antes);
+    }
+    const campo = document.activeElement;
+    if (sair && campo?.classList.contains('legenda-texto')) campo.blur();
   }
 
   _aplicarTexto(itemId, texto) {
@@ -338,11 +375,14 @@ export class Legendas {
     const { antes, dentro, depois } = separar(item, p.legendas[midia.id] || []);
     const novas = realinhar(dentro, texto, [item.entrada, item.saida])
       .map((w) => ({
-        texto: [...w.texto].slice(0, MAX_LETRAS).join(''), // o servidor não aceita "palavra" maior (um link colado)
         inicio: Math.max(0, w.inicio), fim: Math.min(midia.duracao, w.fim),
+        texto: [...w.texto].slice(0, MAX_LETRAS).join(''), // o servidor não aceita "palavra" maior (um link colado)
       }))
       .filter((w) => w.fim - w.inicio > 0.0005);
-    p.legendas = { ...p.legendas, [midia.id]: [...antes, ...novas, ...depois].sort((a, b) => a.inicio - b.inicio) };
+    const palavras = [...antes, ...novas, ...depois].sort((a, b) => a.inicio - b.inicio);
+    if (JSON.stringify(palavras) === JSON.stringify(p.legendas[midia.id])) return; // só espaços mudaram
+    p.legendas = { ...p.legendas, [midia.id]: palavras };
+    this.app.agendarSalvamento();
     this.app.redesenhar();
   }
 }

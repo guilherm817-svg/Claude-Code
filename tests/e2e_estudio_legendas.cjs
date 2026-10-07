@@ -1,19 +1,20 @@
 // Teste das legendas automáticas num Chromium de verdade: ligar as legendas, receber a transcrição (de um Whisper
 // falso, ver tests/servidor_teste_estudio.py), ver a legenda na prévia, corrigir uma palavra, exportar e conferir
-// que o vídeo tem a mesma legenda da prévia. Rode na raiz do projeto: node tests/e2e_estudio_legendas.cjs
+// que o vídeo tem a mesma legenda da prévia. Depois, corrigir o texto e ir direto para outra ação sem sair do campo
+// (recarregar, desfazer, tirar o clipe, trocar de projeto) e recarregar a página no meio de uma transcrição.
+// Rode na raiz do projeto: node tests/e2e_estudio_legendas.cjs
 // (precisa do playwright e do .venv; com o playwright global, use NODE_PATH="$(npm root -g)").
 // Com CAPTURAS=<pasta>, guarda as imagens da prévia e do vídeo exportado para olhar.
 const { chromium } = require('playwright');
 const { spawn, spawnSync } = require('child_process');
 const fs = require('fs');
+const net = require('net');
 const os = require('os');
 const path = require('path');
 
 const RAIZ = path.dirname(__dirname);
 const PYTHON = process.env.PYTHON || [path.join(RAIZ, '.venv', 'bin', 'python'), path.join(RAIZ, '.venv', 'Scripts', 'python.exe')]
   .find((p) => fs.existsSync(p)) || 'python3';
-const PORTA = 8700 + Math.floor(Math.random() * 200);
-const BASE = `http://127.0.0.1:${PORTA}`;
 const TEMP = fs.mkdtempSync(path.join(os.tmpdir(), 'estudio-e2e-legendas-'));
 const CAPTURAS = process.env.CAPTURAS ? path.resolve(process.env.CAPTURAS) : null;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -84,10 +85,27 @@ function iou(a, b, classe) {
   return algum ? juntos / algum : 1;
 }
 
-async function esperarServidor() {
+// Uma porta livre, escolhida pelo sistema: com outro teste rodando junto, cada um fala com o seu servidor.
+function portaLivre() {
+  return new Promise((resolver, rejeitar) => {
+    const sonda = net.createServer().once('error', rejeitar);
+    sonda.listen(0, '127.0.0.1', () => {
+      const { port } = sonda.address();
+      sonda.close(() => resolver(port));
+    });
+  });
+}
+
+function subirServidor(porta, pasta, ...extra) {
+  return spawn(PYTHON, [path.join(RAIZ, 'tests', 'servidor_teste_estudio.py'), '--porta', String(porta), ...extra], {
+    cwd: RAIZ, env: { ...process.env, ESTUDIO_PASTA_DADOS: path.join(TEMP, pasta) }, stdio: 'inherit',
+  });
+}
+
+async function esperarServidor(base) {
   for (let i = 0; i < 100; i++) {
     try {
-      if ((await fetch(`${BASE}/api/projetos`)).ok) return;
+      if ((await fetch(`${base}/api/projetos`)).ok) return;
     } catch { /* ainda subindo */ }
     await sleep(100);
   }
@@ -97,12 +115,12 @@ async function esperarServidor() {
 (async () => {
   const clipe = gerarClipe();
   if (CAPTURAS) fs.mkdirSync(CAPTURAS, { recursive: true });
-  const servidor = spawn(PYTHON, [path.join(RAIZ, 'tests', 'servidor_teste_estudio.py'), '--porta', String(PORTA)], {
-    cwd: RAIZ, env: { ...process.env, ESTUDIO_PASTA_DADOS: path.join(TEMP, 'dados') }, stdio: 'inherit',
-  });
+  const porta = await portaLivre();
+  const base = `http://127.0.0.1:${porta}`;
+  const servidores = [subirServidor(porta, 'dados')];
   const navegador = await chromium.launch();
   try {
-    await esperarServidor();
+    await esperarServidor(base);
     const pagina = await navegador.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2, acceptDownloads: true });
     const erros = [];
     pagina.on('pageerror', (e) => erros.push(e.message));
@@ -135,7 +153,7 @@ async function esperarServidor() {
     };
 
     console.log('Ligar as legendas');
-    await pagina.goto(BASE);
+    await pagina.goto(base);
     await pagina.setInputFiles('#arquivos', [clipe]);
     await pagina.waitForFunction(() => document.querySelectorAll('.clipe').length === 1, null, { timeout: 60000 });
     await esperarSalvo();
@@ -220,13 +238,150 @@ async function esperarServidor() {
       const ppm = Buffer.concat([Buffer.from(`P6 ${previa.largura} ${previa.altura} 255\n`), quadro]);
       fs.writeFileSync(path.join(CAPTURAS, '4-video-exportado.ppm'), ppm);
     }
+
+    // Daqui em diante o campo do texto nunca perde o foco por conta do teste: é o que acontece quando a pessoa
+    // corrige uma palavra e vai direto para outra ação.
+    console.log('Corrigir sem sair do campo');
+    const projetoId = p.id;
+    const projetoDe = (id) => pagina.evaluate(async (i) => (await fetch(`/api/projetos/${i}`)).json(), id);
+    const textoDe = (proj) => (proj.legendas[midia.id] || []).map((w) => w.texto).join(' ');
+    const textoNoServidor = async () => textoDe(await projetoDe(projetoId));
+    const selecionarClipe = async () => {
+      const caixa = await (await pagina.$('.clipe')).boundingBox();
+      await pagina.mouse.click(caixa.x + 30, caixa.y + 30);
+      await pagina.waitForSelector('.legenda-texto');
+    };
+    const focoNoTexto = () => pagina.evaluate(() => !!document.activeElement?.classList.contains('legenda-texto'));
+    const esperarNoServidor = async (texto) => {
+      for (let i = 0; i < 100 && await textoNoServidor() !== texto; i++) await sleep(100);
+      return textoNoServidor();
+    };
+
+    await selecionarClipe();
+    await pagina.fill('.legenda-texto', 'Isso virou tudo agora');
+    conferir(await esperarNoServidor('Isso virou tudo agora') === 'Isso virou tudo agora' && await focoNoTexto(),
+      'a correção é salva enquanto se digita, com o cursor ainda no campo', await textoNoServidor());
+    await esperarSalvo();
+
+    await pagina.fill('.legenda-texto', 'Isso ficou tudo agora');
+    await pagina.reload();
+    await pagina.waitForSelector('.clipe');
+    conferir(await esperarNoServidor('Isso ficou tudo agora') === 'Isso ficou tudo agora', 'recarregar a página logo depois de digitar não perde a correção', await textoNoServidor());
+
+    await selecionarClipe();
+    await pagina.fill('.legenda-texto', 'Isso mudou tudo agora');
+    conferir(await pagina.isEnabled('#btn-desfazer'), 'o botão Desfazer já vale para o que está sendo digitado');
+    await pagina.click('#btn-desfazer', { timeout: 5000 }).catch(() => {});
+    await esperarSalvo();
+    conferir(await pagina.inputValue('.legenda-texto') === 'Isso ficou tudo agora' && await textoNoServidor() === 'Isso ficou tudo agora',
+      'o botão Desfazer desfaz a correção que estava sendo digitada, no campo e no projeto',
+      { campo: await pagina.inputValue('.legenda-texto'), servidor: await textoNoServidor() });
+    conferir(await pagina.isEnabled('#btn-refazer'), 'depois de desfazer, o Refazer fica disponível');
+    await pagina.click('#btn-refazer', { timeout: 5000 }).catch(() => {});
+    await esperarSalvo();
+    conferir(await pagina.inputValue('.legenda-texto') === 'Isso mudou tudo agora' && await textoNoServidor() === 'Isso mudou tudo agora',
+      'o Refazer devolve a correção', { campo: await pagina.inputValue('.legenda-texto'), servidor: await textoNoServidor() });
+
+    await pagina.fill('.legenda-texto', 'Isso mudou tudo hoje');
+    await pagina.click('.linha-ferramentas button:has-text("Tirar")');
+    await esperarSalvo();
+    let salvo = await projetoDe(projetoId);
+    conferir(!(await pagina.$('.legenda-texto')) && (await pagina.textContent('#inspetor .painel-titulo')).startsWith('Projeto'),
+      'tirar o clipe com o cursor no texto atualiza o painel (não fica o clipe que saiu)', await pagina.textContent('#inspetor .painel-titulo'));
+    conferir(salvo.linha.length === 0 && textoDe(salvo) === 'Isso mudou tudo hoje', 'a correção e a retirada do clipe ficam salvas',
+      { linha: salvo.linha.length, texto: textoDe(salvo) });
+    await pagina.keyboard.press('Control+z');
+    await esperarSalvo();
+    salvo = await projetoDe(projetoId);
+    conferir(salvo.linha.length === 1 && textoDe(salvo) === 'Isso mudou tudo hoje', 'Ctrl+Z primeiro devolve o clipe à linha', { linha: salvo.linha.length, texto: textoDe(salvo) });
+    await pagina.keyboard.press('Control+z');
+    await esperarSalvo();
+    conferir(await textoNoServidor() === 'Isso mudou tudo agora', 'e depois desfaz a correção, que é um passo à parte', await textoNoServidor());
+
+    await selecionarClipe();
+    await pagina.fill('.legenda-texto', 'Isso mudou tudo mesmo');
+    await pagina.click('#btn-projetos');
+    await pagina.click('.menu-item:has-text("Novo projeto")');
+    await pagina.waitForFunction(() => !document.querySelector('.clipe') && document.querySelector('#estado-salvo').textContent === 'Tudo salvo');
+    conferir(await textoNoServidor() === 'Isso mudou tudo mesmo', 'trocar de projeto com o cursor no texto salva a correção no projeto certo', await textoNoServidor());
+    conferir(await pagina.isDisabled('#btn-desfazer'), 'o projeto novo começa sem nada para desfazer');
+    await pagina.evaluate(() => document.activeElement?.blur()); // o projeto novo abre com o cursor no nome dele
+    await pagina.keyboard.press('Control+z');
+    await sleep(700);
+    conferir(await pagina.textContent('#estado-salvo') === 'Tudo salvo', 'Ctrl+Z no projeto novo não traz nada do projeto anterior', await pagina.textContent('#estado-salvo'));
+    await pagina.click('#btn-projetos');
+    await pagina.click('.menu-item:not(.destaque):not(.perigo):not(.atual)');
+    await pagina.waitForSelector('.clipe');
+
+    console.log('Transcrever de novo enquanto edita outra coisa');
+    await selecionarClipe();
+    // Segura as consultas da transcrição: a tela não fica sabendo que o texto novo já chegou ao servidor.
+    let soltar;
+    const segurar = new Promise((r) => { soltar = r; });
+    await pagina.route('**/api/legendas/*', async (rota) => { await segurar; await rota.continue().catch(() => {}); });
+    await pagina.click('button:has-text("Transcrever de novo")');
+    conferir(await esperarNoServidor('Isso muda tudo agora') === 'Isso muda tudo agora', 'a nova transcrição chega ao servidor');
+    await pagina.keyboard.press('Escape');
+    await pagina.click('label:has-text("Tudo em maiúsculas") input');
+    await sleep(100);
+    await esperarSalvo();
+    conferir(await textoNoServidor() === 'Isso muda tudo agora', 'salvar outra mudança no meio da transcrição não volta o texto antigo no servidor', await textoNoServidor());
+    soltar();
+    await pagina.waitForSelector('text=Legendas prontas', { timeout: 30000 });
+    await pagina.unroute('**/api/legendas/*');
+    await esperarSalvo();
+    await selecionarClipe();
+    conferir(await pagina.inputValue('.legenda-texto') === 'Isso muda tudo agora' && await textoNoServidor() === 'Isso muda tudo agora',
+      'tela e servidor ficam com a transcrição nova', { campo: await pagina.inputValue('.legenda-texto'), servidor: await textoNoServidor() });
+
+    console.log('Recarregar no meio da transcrição');
+    // Outro Estúdio, com um Whisper falso que leva 2 s por clipe: dá tempo de corrigir o primeiro clipe e recarregar a
+    // página com os outros dois ainda na fila do servidor.
+    const portaLenta = await portaLivre();
+    const baseLenta = `http://127.0.0.1:${portaLenta}`;
+    servidores.push(subirServidor(portaLenta, 'dados-lento', '--demora', '2'));
+    await esperarServidor(baseLenta);
+    const lenta = await navegador.newPage({ viewport: { width: 1440, height: 900 } });
+    lenta.on('pageerror', (e) => erros.push(e.message));
+    lenta.on('console', (m) => { if (m.type() === 'error') erros.push(m.text()); });
+    lenta.on('dialog', (d) => d.accept());
+    const salvoNaLenta = () => lenta.waitForFunction(() => document.querySelector('#estado-salvo').textContent === 'Tudo salvo');
+    await lenta.goto(baseLenta);
+    const video = fs.readFileSync(clipe);
+    await lenta.setInputFiles('#arquivos', ['A', 'B', 'C'].map((letra) => ({ name: `Bloco ${letra}.webm`, mimeType: 'video/webm', buffer: video })));
+    await lenta.waitForFunction(() => document.querySelectorAll('.clipe').length === 3, null, { timeout: 60000 });
+    await salvoNaLenta();
+    await lenta.click('.chave-legendas input');
+    const primeiro = await (await lenta.$('.clipe')).boundingBox();
+    await lenta.mouse.click(primeiro.x + 30, primeiro.y + 30);
+    await lenta.waitForSelector('.legenda-texto', { timeout: 30000 }); // o primeiro clipe já foi transcrito
+    await lenta.fill('.legenda-texto', 'Isso mudou tudo agora');
+    await lenta.reload();
+    await lenta.waitForSelector('.clipe');
+    conferir(await lenta.waitForSelector('.andamento-legendas', { timeout: 5000 }).then(() => true, () => false),
+      'depois de recarregar, a tela volta a acompanhar a transcrição que continuou no servidor');
+    await lenta.waitForSelector('text=Legendas prontas', { timeout: 30000 });
+    await lenta.click('label:has-text("Tudo em maiúsculas") input'); // uma mudança qualquer, para salvar tudo de novo
+    await salvoNaLenta();
+    const textos = await lenta.evaluate(async () => {
+      const [{ id }] = await (await fetch('/api/projetos')).json();
+      const proj = await (await fetch(`/api/projetos/${id}`)).json();
+      return proj.midias.map((m) => (proj.legendas[m.id] || []).map((w) => w.texto).join(' '));
+    });
+    await lenta.mouse.click(primeiro.x + 30, primeiro.y + 30);
+    await lenta.waitForSelector('.legenda-texto');
+    const campo = await lenta.inputValue('.legenda-texto');
+    conferir(campo === 'Isso mudou tudo agora' && textos.join('|') === 'Isso mudou tudo agora|Isso muda tudo agora|Isso muda tudo agora',
+      'a correção feita antes de recarregar continua na tela e no servidor, e os outros clipes recebem a transcrição', { campo, textos });
+    await lenta.close();
+
     conferir(erros.length === 0, 'nenhum erro no console', erros);
   } catch (erro) {
     falhas++;
     console.log('  FAIL', erro.message);
   } finally {
     await navegador.close();
-    servidor.kill();
+    servidores.forEach((s) => s.kill());
     fs.rmSync(TEMP, { recursive: true, force: true });
   }
   console.log(falhas ? `\n${falhas} falha(s)` : '\nTudo certo');
