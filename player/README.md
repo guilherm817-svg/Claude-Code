@@ -69,6 +69,9 @@ O script inicia sozinho todos os `<div class="vsl-player">` da página. Dê um `
 chave usada para lembrar a posição e os elementos já mostrados. Sem `data-id`, o player usa o `id` do `div` ou
 um código derivado do endereço do vídeo.
 
+Ao trocar o vídeo de um player, troque também o `data-id` (por exemplo `vsl-v2`): o painel de retenção agrupa as
+sessões por esse identificador, e dois vídeos com o mesmo id misturam curva, duração e taxa de pitch.
+
 Em construtores de página (Elementor, Atomicat, WordPress...), use o bloco de "HTML personalizado" e cole o
 mesmo trecho. O CSS e o JS podem ficar hospedados no seu domínio ou em um CDN.
 
