@@ -135,8 +135,22 @@ export class Previa {
     if (this.tempo >= this.total - 0.02) this.buscar(0);
     this.tocando = true;
     this.videoAtivo.play().catch(() => { /* o navegador às vezes recusa antes do primeiro clique */ });
+    this._liberarOutroPlayer();
     this.aoTocarOuPausar?.(true);
     requestAnimationFrame(this._quadro);
+  }
+
+  // O Safari só deixa um <video> tocar com som depois de um play() vindo de um clique ou de uma tecla. A troca de clipe
+  // não vem de um clique, então o outro player é liberado aqui, no Tocar, com o volume zerado por um instante.
+  _liberarOutroPlayer() {
+    const outro = this.videos[1 - this.ativo];
+    if (outro._liberado || !outro.src) return;
+    const volume = outro.volume;
+    outro.volume = 0;
+    outro.play().then(() => {
+      outro._liberado = true;
+      if (!this.tocando || outro !== this.videoAtivo) outro.pause();
+    }).catch(() => {}).finally(() => { outro.volume = volume; });
   }
 
   pausar() {
@@ -161,7 +175,8 @@ export class Previa {
     if (video.dataset.url !== segmento.url || Math.abs(video.currentTime - segmento.item.entrada) > 0.05) {
       this._posicionar(video, segmento, segmento.item.entrada);
     }
-    video.play().catch(() => {});
+    // Se o navegador ainda assim recusar (Safari), a prévia pausa no começo do clipe: o próximo Tocar libera o player.
+    video.play().catch((erro) => { if (erro?.name === 'NotAllowedError') this.pausar(); });
     anterior.pause();
     this.tempo = segmento.inicio;
     this._prepararProximo();
@@ -214,15 +229,35 @@ export class Previa {
       ctx.drawImage(video, (L - w) / 2, (A - h) / 2, w, h);
     };
     if (this.enquadramento === 'desfocado' && Math.abs(vl / va - L / A) > 0.01) {
-      // Mesmo desfoque da exportação, proporcional ao tamanho da prévia.
-      ctx.save();
-      ctx.filter = `blur(${Math.round(32 * (L / this.formato.largura))}px) brightness(0.88)`;
-      desenhar(Math.max(L / vl, A / va) * 1.08);
-      ctx.restore();
+      this._desenharFundoDesfocado(video, L, A);
       desenhar(Math.min(L / vl, A / va));
     } else {
       desenhar(Math.max(L / vl, A / va));
     }
+  }
+
+  // Fundo desfocado sem ctx.filter, que o Safari não tem: o quadro é reduzido a poucos pixels e ampliado de volta, como
+  // a exportação faz antes do desfoque, e escurecido um pouco.
+  _desenharFundoDesfocado(video, L, A) {
+    const fundo = this._fundo || (this._fundo = document.createElement('canvas'));
+    const pl = Math.max(2, Math.round(L / 24));
+    const pa = Math.max(2, Math.round(A / 24));
+    if (fundo.width !== pl || fundo.height !== pa) {
+      fundo.width = pl;
+      fundo.height = pa;
+    }
+    const escala = Math.max(pl / video.videoWidth, pa / video.videoHeight);
+    const w = video.videoWidth * escala;
+    const h = video.videoHeight * escala;
+    fundo.getContext('2d').drawImage(video, (pl - w) / 2, (pa - h) / 2, w, h);
+    const { ctx } = this;
+    ctx.save();
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(fundo, 0, 0, L, A);
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.12)';
+    ctx.fillRect(0, 0, L, A);
+    ctx.restore();
   }
 
   _ajustarTamanho() {

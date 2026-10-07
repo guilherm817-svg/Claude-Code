@@ -62,3 +62,11 @@ export function lembrar(chave, padrao) {
     return padrao;
   }
 }
+
+// No Mac, os atalhos usam ⌘ (Command) e ⇧ (Shift) no lugar de Ctrl e Shift.
+export const NO_MAC = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || '');
+
+export function atalho(texto) {
+  if (!NO_MAC) return texto;
+  return texto.replace(/Ctrl\+Shift\+/g, '⌘⇧').replace(/Ctrl\+/g, '⌘').replace(/\bCtrl\b/g, '⌘');
+}

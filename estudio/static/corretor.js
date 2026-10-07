@@ -2,7 +2,7 @@
 // tela mostra a versão corrigida em blocos prontos para copiar. Fica numa aba própria, ao lado da Montagem.
 
 import { icone } from './icones.js';
-import { $, avisar, el, guardar, lembrar } from './util.js';
+import { $, NO_MAC, atalho, avisar, el, guardar, lembrar } from './util.js';
 
 const HISTORICO_MAXIMO = 10;
 const GRAVIDADES = { alta: 'Alta', media: 'Média', baixa: 'Baixa' };
@@ -136,7 +136,7 @@ function montarFormulario() {
       'Se você contar, o Corretor aponta o que a IA colocou sem você pedir (marca, produto, frase).'),
     el('div', { class: 'envio' },
       el('button', { id: 'corretor-enviar', class: 'botao primario grande', type: 'submit' }, icone('varinha', 16), 'Corrigir prompt'),
-      el('p', { class: 'atalho-envio' }, el('kbd', {}, 'Ctrl'), ' + ', el('kbd', {}, 'Enter'), ' também corrige')),
+      el('p', { class: 'atalho-envio' }, el('kbd', {}, NO_MAC ? '⌘' : 'Ctrl'), ' + ', el('kbd', {}, 'Enter'), ' também corrige')),
     el('div', { id: 'corretor-historico', class: 'historico' }),
     el('div', { class: 'rodape-form' },
       el('button', { type: 'button', class: 'botao fantasma pequeno', onclick: () => { estado.trocandoChave = true; desenharLado(); focarChave(); } },
@@ -440,7 +440,7 @@ async function copiar(texto, botao) {
     caixa.remove();
   }
   if (!copiou) {
-    avisar('Não consegui copiar. Selecione o texto do prompt e use Ctrl+C.', 'erro');
+    avisar(atalho('Não consegui copiar. Selecione o texto do prompt e use Ctrl+C.'), 'erro');
     return;
   }
   const original = [...botao.childNodes];

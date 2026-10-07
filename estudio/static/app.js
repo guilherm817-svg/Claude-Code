@@ -6,7 +6,7 @@ import { icone } from './icones.js';
 import { LinhaDoTempo, desenharOnda, desenharTira } from './linha.js';
 import { Legendas } from './painel_legendas.js';
 import { Previa } from './previa.js';
-import { $, avisar, el, guardar, lembrar, limitar, relogio, segundos, tamanhoArquivo } from './util.js';
+import { $, atalho, avisar, el, guardar, lembrar, limitar, relogio, segundos, tamanhoArquivo } from './util.js';
 
 const DURACAO_MINIMA = 0.1;
 const QUADRO = 1 / 30; // passo das setas e dos botões de ajuste fino
@@ -647,7 +647,7 @@ function painelDoProjeto() {
           ['Espaço', 'tocar / pausar'], ['← →', 'um quadro (Shift: 1 s)'], ['↑ ↓', 'clipe anterior / próximo'],
           ['S', 'dividir na agulha'], ['I / O', 'começo / fim do clipe na agulha'], ['Ctrl+D', 'duplicar clipe'],
           ['Delete', 'tirar clipe da linha'], ['Ctrl+Z', 'desfazer'], ['Ctrl+Shift+Z', 'refazer'], ['Z', 'mostrar o vídeo inteiro'],
-        ].flatMap(([tecla, acao]) => [el('dt', {}, el('kbd', {}, tecla)), el('dd', {}, acao)])))),
+        ].flatMap(([tecla, acao]) => [el('dt', {}, el('kbd', {}, atalho(tecla))), el('dd', {}, acao)])))),
   ];
 }
 
@@ -955,7 +955,7 @@ function montarAcoesDaLinha() {
   const botao = (nomeIcone, texto, titulo, acao) => el('button', { class: 'botao fantasma', title: titulo, onclick: acao }, icone(nomeIcone, 15), texto);
   linha.acoes.append(
     botao('tesoura', 'Dividir', 'Dividir o clipe na agulha (S)', dividirNaAgulha),
-    botao('duplicar', 'Duplicar', 'Duplicar o clipe selecionado (Ctrl+D)', duplicarSelecionado),
+    botao('duplicar', 'Duplicar', atalho('Duplicar o clipe selecionado (Ctrl+D)'), duplicarSelecionado),
     botao('lixeira', 'Tirar', 'Tirar o clipe selecionado da linha (Delete)', removerSelecionado));
 }
 
@@ -1048,6 +1048,7 @@ function montarEventos() {
 
 function montarIcones() {
   document.querySelectorAll('[data-icone]').forEach((alvo) => alvo.prepend(icone(alvo.dataset.icone, Number(alvo.dataset.tamanho) || 18)));
+  document.querySelectorAll('[title*="Ctrl"]').forEach((alvo) => { alvo.title = atalho(alvo.title); });
 }
 
 async function iniciar() {
