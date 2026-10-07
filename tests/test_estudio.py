@@ -306,7 +306,7 @@ def test_exportar_projeto_vazio(estudio):
 
 @pytest.fixture
 def cliente(estudio):
-    return TestClient(criar_app(estudio))
+    return TestClient(criar_app(estudio), base_url="http://127.0.0.1")
 
 
 def test_api_fluxo_completo(cliente, clipes):

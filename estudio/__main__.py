@@ -5,6 +5,7 @@
 """
 
 import argparse
+import os
 import socket
 import threading
 import webbrowser
@@ -18,6 +19,11 @@ from .servidor import criar_app
 def porta_livre(inicial: int) -> int:
     for porta in range(inicial, inicial + 20):
         with socket.socket() as s:
+            if os.name == "posix":
+                # Como o uvicorn faz. Sem isso, as conexões de um Estúdio fechado há pouco (em TIME_WAIT) fariam a
+                # porta parecer ocupada e a tela abriria em outra porta, sem o projeto e os ajustes da última vez.
+                # No Windows a opção deixaria usar uma porta que outro programa ainda está usando.
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             try:
                 s.bind(("127.0.0.1", porta))
                 return porta
