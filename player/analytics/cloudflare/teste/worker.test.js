@@ -1,13 +1,37 @@
 // Testes do Worker (node --test). Rodam sem a Cloudflare: o D1 é imitado com o node:sqlite.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { criarD1 } from './d1.js';
+import { criarD1, lerMigracoes } from './d1.js';
 import {
-  criarApp, registrar, resumo, players, sessoes, csv, unirFaixas, curvaRetencao, compactarCurva, origem, dispositivo,
-  validarEnvio, pitchValido, periodoParaDatas, hojeNoFuso, numero, MAX_SEGUNDOS, PONTOS_CURVA, LIMITE_CORPO, MAX_EVENTOS,
+  criarApp, registrar, resumo, players, sessoes, csv, unirFaixas, curvaRetencao, compactarCurva, origem, dispositivo, navegador,
+  validarEnvio, pitchValido, periodoParaDatas, hojeNoFuso, numero, rodarComandoDoEsquema,
+  MAX_SEGUNDOS, PONTOS_CURVA, LIMITE_CORPO, MAX_EVENTOS, AMOSTRA_CURVA, PLAYS_POUCOS, MAX_NAVEGADOR,
 } from '../src/app.js';
 
 const FUSO = 'America/Sao_Paulo';
+// User-Agents reais (abreviados), um por classe de navegador. Os mesmos estão em tests/test_vsl_analytics.py.
+const UA = {
+  instagramIos: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Instagram 334.0.4.32.98 (iPhone15,2; iOS 17_5; pt_BR; pt; scale=3.00; 1179x2556; 601595932)',
+  instagramAndroid: 'Mozilla/5.0 (Linux; Android 14; SM-S918B Build/UP1A.231005.007; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/124.0.6367.179 Mobile Safari/537.36 Instagram 334.0.0.42.95 Android (34/14; 450dpi; 1080x2340; samsung; SM-S918B; dm3q; qcom; pt_BR; 597335394)',
+  facebookAndroid: 'Mozilla/5.0 (Linux; Android 14; SM-A546E Build/UP1A.231005.007; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/124.0.6367.179 Mobile Safari/537.36 [FB_IAB/FB4A;FBAV/467.0.0.47.108;]',
+  facebookIos: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 [FBAN/FBIOS;FBAV/467.0.0.37.108;FBBV/605519286;FBDV/iPhone15,2;FBMD/iPhone;FBSN/iOS;FBSV/17.5;FBSS/3;FBID/phone;FBLC/pt_BR;FBOP/5]',
+  tiktokIos: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 musical_ly_34.5.0 JsSdk/2.0 NetType/WIFI Channel/App Store ByteLocale/pt-BR Region/BR WKWebView/1 BytedanceWebview/d8a21c6',
+  tiktokAndroid: 'Mozilla/5.0 (Linux; Android 13; Pixel 7 Build/TQ3A.230805.001; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/124.0.6367.179 Mobile Safari/537.36 trill_2022803 JsSdk/1.0 NetType/WIFI Channel/googleplay AppName/musical_ly app_version/34.5.3 BytedanceWebview/d8a21c6',
+  webviewWv: 'Mozilla/5.0 (Linux; Android 13; Pixel 7 Build/TQ3A.230805.001; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/124.0.6367.179 Mobile Safari/537.36',
+  webviewVersion: 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/124.0.0.0 Mobile Safari/537.36',
+  samsung: 'Mozilla/5.0 (Linux; Android 14; SAMSUNG SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) SamsungBrowser/25.0 Chrome/121.0.0.0 Mobile Safari/537.36',
+  edge: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 Edg/124.0.0.0',
+  edgeAndroid: 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36 EdgA/124.0.0.0',
+  firefox: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:126.0) Gecko/20100101 Firefox/126.0',
+  firefoxIos: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) FxiOS/126.0 Mobile/15E148 Safari/605.1.15',
+  chrome: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+  chromeAndroid: 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
+  chromeIos: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/124.0.6367.88 Mobile/15E148 Safari/604.1',
+  safariIos: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
+  safariMac: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15',
+  wkwebview: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148',
+  curl: 'curl/8.5.0',
+};
 const envio = (sessao = 's1', extra = {}) => ({
   v: '1.0.0', player: 'vsl-principal', visitor: 'vis-1', session: sessao,
   url: 'https://site.com/vsl?utm_source=Facebook&utm_campaign=lancamento', referrer: 'https://l.facebook.com/',
@@ -41,6 +65,19 @@ test('origem, dispositivo, numero e pitch', () => {
   assert.equal(pitchValido('abc'), null); assert.equal(pitchValido(true), null); assert.equal(pitchValido(-1), null);
   assert.equal(pitchValido([1]), null); assert.equal(pitchValido('nan'), null); assert.equal(pitchValido('12.5'), 12.5);
   assert.equal(pitchValido(0), 0);
+});
+
+test('navegador pelo User-Agent: um UA por classe, apps antes das WebViews, WebViews antes do Chrome', () => {
+  const esperado = {
+    instagramIos: 'Instagram', instagramAndroid: 'Instagram', facebookAndroid: 'Facebook', facebookIos: 'Facebook',
+    tiktokIos: 'TikTok', tiktokAndroid: 'TikTok', webviewWv: 'Chrome WebView', webviewVersion: 'Chrome WebView',
+    samsung: 'Samsung', edge: 'Edge', edgeAndroid: 'Edge', firefox: 'Firefox', firefoxIos: 'Firefox',
+    chrome: 'Chrome', chromeAndroid: 'Chrome', chromeIos: 'Chrome', safariIos: 'Safari', safariMac: 'Safari',
+    wkwebview: 'Outro', curl: 'Outro',
+  };
+  for (const [chave, nome] of Object.entries(esperado)) assert.equal(navegador(UA[chave]), nome, chave);
+  assert.equal(navegador(''), 'Outro'); assert.equal(navegador(undefined), 'Outro'); assert.equal(navegador(null), 'Outro');
+  assert.equal(navegador(123), 'Outro');
 });
 
 test('validarEnvio rejeita e limpa', () => {
@@ -192,7 +229,114 @@ test('csv neutraliza fórmulas e escapa separadores', async () => {
   assert.ok(linha.includes(";'+1;"));
   assert.ok(linha.includes(";'@sum(1);'@SUM(1);;\"'-x;y\";"));
   const cabecalho = (await csv(db)).split('\n')[0].split(';');
-  assert.equal(cabecalho.length, 20); assert.equal(cabecalho[19], 'dia'); assert.equal(cabecalho[3], 'inicio');
+  assert.equal(cabecalho.length, 21); assert.equal(cabecalho[19], 'navegador'); assert.equal(cabecalho[20], 'dia'); assert.equal(cabecalho[3], 'inicio');
+});
+
+test('navegador gravado na sessão e no CSV (penúltima coluna, antes de dia)', async () => {
+  const db = criarD1();
+  await registrar(db, envio('a'), UA.instagramIos, FUSO, em('2026-10-07T13:00:00Z'));
+  await registrar(db, envio('b'), UA.webviewWv, FUSO, em('2026-10-07T13:01:00Z'));
+  await registrar(db, envio('c'), '', FUSO, em('2026-10-07T13:02:00Z'));
+  const lista = await sessoes(db);
+  assert.deepEqual(lista.map((s) => s.navegador), ['Instagram', 'Chrome WebView', 'Outro']);
+  const linhas = (await csv(db)).trim().split('\n');
+  assert.equal(linhas.length, 4);
+  const colunas = linhas[1].split(';');
+  assert.equal(colunas[19], 'Instagram'); assert.equal(colunas[20], '2026-10-07'); assert.equal(colunas[18], '0');
+  assert.ok(linhas[2].includes(';Chrome WebView;'));
+});
+
+test('resumo: cliques, erros, funil, amostra pequena e tabelas por navegador, criativo e campanha (todas com cliques)', async () => {
+  const db = criarD1();
+  const url = (conteudo, campanha = 'lancamento') => 'https://site.com/vsl?utm_source=Facebook&utm_campaign=' + campanha + '&utm_content=' + conteudo;
+  // a: play, chegou ao pitch, clicou duas vezes (conta uma sessão)
+  await registrar(db, envio('a', { url: url('video-1'), events: [{ type: 'unmute' }, { type: 'cta_click', where: 'end' }, { type: 'cta_click' }] }), UA.instagramIos);
+  // b: play, não chegou ao pitch, erro do vídeo
+  await registrar(db, envio('b', { visitor: 'vis-2', url: url('video-1'), maxTime: 10, watched: [[0, 9]], events: [{ type: 'error', code: 'hls-load' }] }), UA.chrome);
+  // c: mudo, clicou no botão da miniatura de pausa; sem utm
+  await registrar(db, envio('c', { visitor: 'vis-3', url: 'https://site.com/vsl', referrer: '', unmuted: false, maxTime: 50, watched: [[0, 49]], events: [{ type: 'cta_click' }] }), UA.safariIos);
+  // d: mudo, outra campanha e outro criativo, UA vazio
+  await registrar(db, envio('d', { visitor: 'vis-4', url: url('video-2', 'remarketing'), unmuted: false, events: [] }), '');
+  const r = await resumo(db);
+  assert.deepEqual([r.sessoes, r.plays, r.chegaram_pitch], [4, 2, 1]);
+  assert.equal(r.cliques, 2); assert.equal(r.taxa_clique, 2, 'cliques ÷ chegaram ao pitch (2 ÷ 1)');
+  assert.equal(r.erros, 1); assert.equal(r.taxa_erro, 0.25);
+  assert.deepEqual(r.funil, { visitas: 4, plays: 2, pitch: 1, cliques: 2 });
+  assert.deepEqual(r.amostra, { plays: 2, pequena: true });
+  assert.equal(r.curva_amostrada, false); assert.equal(r.curva_n, 2); assert.equal(r.navegador, null);
+  const porNome = (lista) => Object.fromEntries(lista.map((g) => [g.nome, g]));
+  const nav = porNome(r.navegadores);
+  assert.deepEqual(Object.keys(nav).sort(), ['Chrome', 'Instagram', 'Outro', 'Safari']);
+  assert.deepEqual(nav.Instagram, { nome: 'Instagram', sessoes: 1, plays: 1, pitch: 1, terminaram: 0, cliques: 1 });
+  assert.deepEqual(nav.Safari, { nome: 'Safari', sessoes: 1, plays: 0, pitch: 0, terminaram: 0, cliques: 1 });
+  assert.deepEqual(nav.Chrome, { nome: 'Chrome', sessoes: 1, plays: 1, pitch: 0, terminaram: 0, cliques: 0 });
+  const cri = porNome(r.criativos);
+  assert.deepEqual(cri['video-1'], { nome: 'video-1', sessoes: 2, plays: 2, pitch: 1, terminaram: 0, cliques: 1 });
+  assert.equal(cri['video-2'].sessoes, 1); assert.equal(cri['(sem utm_content)'].sessoes, 1); assert.equal(cri['(sem utm_content)'].cliques, 1);
+  const cam = porNome(r.campanhas);
+  assert.equal(cam.lancamento.sessoes, 2); assert.equal(cam.remarketing.sessoes, 1); assert.equal(cam['(sem utm_campaign)'].cliques, 1);
+  assert.equal(porNome(r.origens).facebook.cliques, 1); assert.equal(porNome(r.origens).direto.cliques, 1);
+  assert.equal(porNome(r.dispositivos).celular.cliques, 2); assert.equal(porNome(r.dispositivos).computador.cliques, 0);
+  // sem sessões: tudo zero, sem divisão por zero
+  const vazio = await resumo(db, { player: 'inexistente' });
+  assert.deepEqual([vazio.cliques, vazio.taxa_clique, vazio.erros, vazio.taxa_erro, vazio.curva_n], [0, 0, 0, 0, 0]);
+  assert.deepEqual(vazio.funil, { visitas: 0, plays: 0, pitch: 0, cliques: 0 }); assert.deepEqual(vazio.navegadores, []);
+  // 30 plays deixam de ser amostra pequena
+  const db2 = criarD1();
+  for (let i = 0; i < PLAYS_POUCOS; i++) await registrar(db2, envio('s' + i));
+  assert.equal((await resumo(db2)).amostra.pequena, false);
+});
+
+test('criativos e campanhas: até 12 e o resto em "outras"', async () => {
+  const db = criarD1();
+  for (let i = 0; i < 15; i++) {
+    await registrar(db, envio('s' + i, { url: 'https://site.com/?utm_content=c' + i + '&utm_campaign=k' + i, events: i < 2 ? [{ type: 'cta_click' }] : [] }));
+  }
+  const r = await resumo(db);
+  assert.equal(r.criativos.length, 13); assert.equal(r.criativos[12].nome, 'outras'); assert.equal(r.criativos[12].sessoes, 3);
+  assert.equal(r.campanhas.length, 13); assert.equal(r.campanhas[12].nome, 'outras');
+  assert.equal(r.criativos.reduce((n, g) => n + g.cliques, 0), 2); assert.equal(r.campanhas.reduce((n, g) => n + g.sessoes, 0), 15);
+});
+
+test('filtro navegador= no resumo e no CSV: exato, por parâmetro ligado, Desconhecido = sem navegador', async () => {
+  const db = criarD1();
+  await registrar(db, envio('a'), UA.instagramIos);
+  await registrar(db, envio('b', { visitor: 'vis-2' }), UA.chrome);
+  await registrar(db, envio('c', { visitor: 'vis-3' }), UA.webviewWv);
+  assert.equal((await resumo(db, { navegador: 'Instagram' })).sessoes, 1);
+  assert.equal((await resumo(db, { navegador: 'Chrome WebView' })).sessoes, 1);
+  assert.equal((await resumo(db, { navegador: 'Chrome' })).sessoes, 1, 'exato: Chrome não pega Chrome WebView');
+  assert.equal((await resumo(db, { navegador: 'chrome' })).sessoes, 0, 'exato: diferencia maiúsculas');
+  assert.equal((await resumo(db, { navegador: "x' OR '1'='1" })).sessoes, 0, 'o valor vai como parâmetro, não como SQL');
+  assert.equal((await resumo(db, { navegador: 'Desconhecido' })).sessoes, 0);
+  const r = await resumo(db, { navegador: 'Instagram', player: 'vsl-principal' });
+  assert.equal(r.navegador, 'Instagram'); assert.deepEqual(r.navegadores.map((n) => n.nome), ['Instagram']); assert.equal(r.visitantes, 1);
+  assert.equal((await csv(db, { navegador: 'Chrome WebView' })).trim().split('\n').length, 2);
+  assert.equal((await csv(db)).trim().split('\n').length, 4);
+  assert.equal((await sessoes(db, { navegador: 'Chrome' }))[0].sessao, 'b');
+});
+
+test('curva amostrada acima de 2.000 plays: tiles exatos, curva sobre 2.000 lidos só de assistido', async () => {
+  const db = criarD1();
+  const inserir = (sessao, comSom = 1) => db.prepare('INSERT INTO sessoes (sessao, player, inicio, dia, ultimo, duracao, max_tempo, com_som, assistido, segundos, navegador) '
+    + 'VALUES (?,?,?,?,?,?,?,?,?,?,?)').bind(sessao, 'vsl-principal', '2026-10-01T10:00:00Z', '2026-10-01', '2026-10-01T10:00:00Z', 60, 10, comSom, '[[0,9]]', 10, 'Chrome').run();
+  for (let i = 0; i < AMOSTRA_CURVA + 1; i++) await inserir('s' + i);
+  await inserir('muda', 0);
+  await db.prepare('INSERT INTO players (player, pitch, duracao, primeiro, ultimo, sessoes) VALUES (?,?,?,?,?,?)')
+    .bind('vsl-principal', 5, 60, '2026-10-01T10:00:00Z', '2026-10-01T10:00:00Z', AMOSTRA_CURVA + 2).run();
+  const r = await resumo(db);
+  assert.equal(r.sessoes, AMOSTRA_CURVA + 2); assert.equal(r.plays, AMOSTRA_CURVA + 1); assert.equal(r.chegaram_pitch, AMOSTRA_CURVA + 1);
+  assert.equal(r.tempo_medio, 10); assert.equal(r.engajamento, Math.round((10 / 60) * 10000) / 10000);
+  assert.equal(r.curva_amostrada, true); assert.equal(r.curva_n, AMOSTRA_CURVA);
+  assert.deepEqual([r.retencao.pontos[0], r.retencao.pontos[9], r.retencao.pontos[10]], [AMOSTRA_CURVA, AMOSTRA_CURVA, 0], 'a sessão muda fica fora da curva');
+  assert.deepEqual(r.amostra, { plays: AMOSTRA_CURVA + 1, pequena: false });
+  // com exatamente 2.000 plays a curva é completa
+  await db.prepare("DELETE FROM sessoes WHERE sessao = 's0'").run();
+  const r2 = await resumo(db);
+  assert.equal(r2.curva_amostrada, false); assert.equal(r2.curva_n, AMOSTRA_CURVA); assert.equal(r2.retencao.pontos[0], AMOSTRA_CURVA);
+  // o filtro vale para a amostra também
+  assert.equal((await resumo(db, { player: 'outro' })).curva_n, 0);
+  assert.equal((await resumo(db, { navegador: 'Safari' })).curva_n, 0);
 });
 
 test('chaves vindas do visitante não corrompem nada (utm_source=__proto__, eventos constructor/__proto__)', async () => {
@@ -321,21 +465,81 @@ test('sem TOKEN configurado o painel e a API ficam abertos', async () => {
 });
 
 test('o esquema é criado sozinho na primeira requisição quando a migração não rodou', async () => {
-  const fs = await import('node:fs');
-  const { DatabaseSync } = await import('node:sqlite');
-  const esquema = ['0001_inicial.sql', '0002_players_e_indice.sql'].map((a) => fs.readFileSync(new URL('../migrations/' + a, import.meta.url), 'utf8')).join('\n');
-  const bruto = new DatabaseSync(':memory:'); // sem tabela nenhuma
-  const db = {
-    prepare(sql) { const st = bruto.prepare(sql); const stmt = { args: [], bind(...a) { stmt.args = a.map((x) => (x === undefined ? null : x)); return stmt; },
-      async first() { const r = st.get(...stmt.args); return r == null ? null : { ...r }; }, async all() { return { results: st.all(...stmt.args).map((r) => ({ ...r })) }; },
-      async run() { const r = st.run(...stmt.args); return { success: true, meta: { changes: r.changes } }; } }; return stmt; },
-    async batch(stmts) { const saida = []; for (const s of stmts) saida.push(await s.run()); return saida; },
-  };
-  const a = criarApp({ painel: '<p>painel</p>', esquema });
+  const db = criarD1([]); // sem tabela nenhuma
+  const a = criarApp({ painel: '<p>painel</p>', esquema: lerMigracoes() });
   const env = { DB: db, TOKEN: '', FUSO };
-  const r = await a.fetch(new Request('http://x/vsl', { method: 'POST', body: JSON.stringify(envio()) }), env);
+  const r = await a.fetch(new Request('http://x/vsl', { method: 'POST', body: JSON.stringify(envio()), headers: { 'User-Agent': UA.samsung } }), env);
   assert.equal(r.status, 204);
-  assert.equal((await (await a.fetch(new Request('http://x/api/resumo'), env)).json()).sessoes, 1);
+  const j = await (await a.fetch(new Request('http://x/api/resumo'), env)).json();
+  assert.equal(j.sessoes, 1); assert.equal(j.navegadores[0].nome, 'Samsung');
+  const colunas = (await db.prepare('PRAGMA table_info(sessoes)').all()).results.map((c) => c.name);
+  assert.ok(colunas.includes('navegador'));
+});
+
+test('migração 0003 idempotente: banco já migrado, duas instâncias do Worker, D1 sem PRAGMA e comando repetido', async () => {
+  const esquema = lerMigracoes();
+  const db = criarD1(); // já rodou todas as migrações (wrangler d1 migrations apply): o ALTER TABLE não pode quebrar
+  const env = { DB: db, TOKEN: '', FUSO };
+  const pedir = (a, caminho, corpo) => a.fetch(new Request('http://x' + caminho, corpo ? { method: 'POST', body: corpo } : {}), env);
+  const a1 = criarApp({ painel: '<p>painel</p>', esquema });
+  assert.equal((await pedir(a1, '/vsl', JSON.stringify(envio('s1')))).status, 204);
+  const a2 = criarApp({ painel: '<p>painel</p>', esquema }); // outra instância (isolate) no mesmo banco
+  assert.equal((await pedir(a2, '/vsl', JSON.stringify(envio('s2')))).status, 204);
+  assert.equal((await (await pedir(a2, '/api/resumo')).json()).sessoes, 2);
+  const colunas = (await db.prepare('PRAGMA table_info(sessoes)').all()).results.filter((c) => c.name === 'navegador');
+  assert.equal(colunas.length, 1, 'a coluna existe uma vez só');
+  // D1 sem PRAGMA: sobra o erro "duplicate column", que é ignorado
+  let pragmas = 0;
+  const semPragma = { prepare(sql) { if (/^PRAGMA/i.test(sql)) { pragmas += 1; throw new Error('PRAGMA nao suportado'); } return db.prepare(sql); } };
+  const a3 = criarApp({ painel: '<p>painel</p>', esquema });
+  assert.equal((await a3.fetch(new Request('http://x/vsl', { method: 'POST', body: JSON.stringify(envio('s3')) }), { ...env, DB: semPragma })).status, 204);
+  assert.equal(pragmas, 1);
+  // rodarComandoDoEsquema direto, três vezes seguidas, num banco cru
+  const cru = criarD1([]);
+  const comandos = esquema.split(';').map((c) => c.replace(/--[^\n]*/g, '').trim()).filter(Boolean);
+  for (let vez = 0; vez < 3; vez++) for (const c of comandos) await rodarComandoDoEsquema(cru, c);
+  assert.equal((await cru.prepare('PRAGMA table_info(sessoes)').all()).results.filter((c) => c.name === 'navegador').length, 1);
+  // outro erro no ALTER não é engolido
+  await assert.rejects(rodarComandoDoEsquema(cru, 'ALTER TABLE inexistente ADD COLUMN x TEXT'), /no such table/);
+});
+
+test('banco antigo: a migração 0003 acrescenta a coluna e as sessões de antes viram "Desconhecido" (filtrável)', async () => {
+  const db = criarD1(['0001_inicial.sql', '0002_players_e_indice.sql']);
+  await db.prepare("INSERT INTO sessoes (sessao, player, inicio, dia, ultimo, duracao, max_tempo, com_som, assistido, segundos) "
+    + "VALUES ('velha', 'vsl-principal', '2026-10-01T10:00:00Z', '2026-10-01', '2026-10-01T10:00:00Z', 120, 40, 1, '[[0,39]]', 40)").run();
+  const a = criarApp({ painel: '<p>painel</p>', esquema: lerMigracoes() });
+  const env = { DB: db, TOKEN: '', FUSO };
+  const r = await a.fetch(new Request('http://x/vsl', { method: 'POST', body: JSON.stringify(envio('nova')), headers: { 'User-Agent': UA.instagramIos } }), env);
+  assert.equal(r.status, 204);
+  const j = await (await a.fetch(new Request('http://x/api/resumo'), env)).json();
+  assert.deepEqual(j.navegadores.map((n) => [n.nome, n.sessoes]), [['Desconhecido', 1], ['Instagram', 1]]);
+  const f = await (await a.fetch(new Request('http://x/api/resumo?navegador=Desconhecido'), env)).json();
+  assert.equal(f.sessoes, 1); assert.equal(f.navegador, 'Desconhecido'); assert.equal(f.navegadores[0].nome, 'Desconhecido');
+  const linhas = (await (await a.fetch(new Request('http://x/api/sessoes.csv?navegador=Desconhecido'), env)).text()).trim().split('\n');
+  assert.equal(linhas.length, 2); assert.ok(linhas[1].startsWith('velha;')); assert.ok(linhas[1].endsWith(';;2026-10-01'));
+});
+
+test('API: navegador= validado (até 40 caracteres), aplicado no resumo e no CSV', async () => {
+  const { env, pedir } = app();
+  const cab = { 'X-Token': 'segredo' };
+  await registrar(env.DB, envio('a'), UA.instagramIos);
+  await registrar(env.DB, envio('b'), UA.webviewWv);
+  let r = await pedir('GET', '/api/resumo?navegador=Instagram', null, cab);
+  const j = await r.json();
+  assert.equal(r.status, 200); assert.equal(j.sessoes, 1); assert.equal(j.navegador, 'Instagram'); assert.equal(j.navegadores[0].nome, 'Instagram');
+  for (const campo of ['cliques', 'taxa_clique', 'erros', 'taxa_erro', 'funil', 'amostra', 'curva_amostrada', 'curva_n', 'navegadores', 'criativos', 'campanhas']) {
+    assert.ok(campo in j, campo);
+  }
+  r = await pedir('GET', '/api/sessoes.csv?navegador=Chrome%20WebView', null, cab);
+  const linhas = (await r.text()).trim().split('\n');
+  assert.equal(r.status, 200); assert.equal(linhas.length, 2); assert.ok(linhas[1].includes(';Chrome WebView;'));
+  assert.equal((await (await pedir('GET', '/api/resumo', null, cab)).json()).navegador, null);
+  assert.equal((await pedir('GET', '/api/resumo?navegador=' + 'a'.repeat(MAX_NAVEGADOR), null, cab)).status, 200);
+  assert.equal((await pedir('GET', '/api/resumo?navegador=' + 'a'.repeat(MAX_NAVEGADOR + 1), null, cab)).status, 400);
+  assert.equal((await pedir('GET', '/api/resumo?navegador=%20%20', null, cab)).status, 400);
+  assert.equal((await pedir('GET', '/api/sessoes.csv?navegador=' + 'a'.repeat(MAX_NAVEGADOR + 1), null, cab)).status, 400);
+  assert.equal((await pedir('GET', '/api/resumo?navegador=' + encodeURIComponent("x' OR 1=1 --"), null, cab)).status, 200);
+  assert.equal((await (await pedir('GET', '/api/resumo?navegador=' + encodeURIComponent("x' OR 1=1 --"), null, cab)).json()).sessoes, 0);
 });
 
 test('o painel do Worker é o mesmo arquivo do servidor Python', async () => {

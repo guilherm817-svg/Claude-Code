@@ -5,33 +5,53 @@
   --vsl-aspect: 16 / 9;
   --vsl-radius: 0px;
   --vsl-progress-height: 6px;
-  --vsl-font: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --vsl-font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --vsl-overlay: rgba(0, 0, 0, 0.45);
   --vsl-box-bg: rgba(0, 0, 0, 0.72);
+  --vsl-cta-margin: clamp(12px, 3cqw, 24px);
 
   position: relative;
   display: block;
   width: 100%;
   max-width: 100%;
   aspect-ratio: var(--vsl-aspect);
-  container-type: inline-size;
+  /* "size" (e não só inline-size) para as queries de altura do modal; a altura vem do aspect-ratio */
+  container-type: size;
   background: #000;
   overflow: hidden;
   border-radius: var(--vsl-radius);
-  font-family: var(--vsl-font);
-  color: #fff;
   cursor: pointer;
   user-select: none;
   -webkit-user-select: none;
   -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
   outline: none;
   isolation: isolate;
-  box-sizing: border-box;
 }
 
-.vsl-player *,
+/* Reset escopado: o tema do construtor (Elementor, Atomicat…) não vaza para dentro do player */
+.vsl-player,
+.vsl-player * {
+  box-sizing: border-box;
+  color: #fff;
+  text-transform: none;
+  letter-spacing: normal;
+  line-height: 1.3;
+  font-family: var(--vsl-font);
+}
+
 .vsl-player *::before,
 .vsl-player *::after { box-sizing: border-box; }
+
+.vsl-player button,
+.vsl-player a {
+  font: inherit;
+  text-transform: none;
+  letter-spacing: inherit;
+}
+
+.vsl-player strong { color: inherit; font-weight: 700; }
+.vsl-player p { margin: 0; }
 
 .vsl-player:focus-visible { box-shadow: 0 0 0 3px var(--vsl-color); }
 
@@ -70,18 +90,35 @@
   transition: none;
 }
 
+/* Escurece e desfoca o vídeo atrás das caixas (vídeo claro continua legível) */
 .vsl-player .vsl-unmute,
 .vsl-player .vsl-paused,
 .vsl-player .vsl-ended,
 .vsl-player .vsl-error,
-.vsl-player .vsl-modal { background: var(--vsl-overlay); }
+.vsl-player .vsl-modal {
+  background-color: var(--vsl-overlay);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+}
 
-.vsl-player .vsl-idle { background: rgba(0, 0, 0, 0.25); }
+/* Capa: a arte fica intacta, só um degradê embaixo para a legenda */
+.vsl-player .vsl-idle { background: linear-gradient(to top, rgba(0, 0, 0, 0.45), transparent 45%); }
 .vsl-player .vsl-loading { background: transparent; pointer-events: none; }
+.vsl-player .vsl-error { cursor: pointer; }
+
+/* Miniatura de pausa pós-pitch (imagem vem por style.backgroundImage) */
+.vsl-player .vsl-pause-poster {
+  padding: 0;
+  background-color: #000;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}
 
 .vsl-player[data-state="autoplaying"] .vsl-unmute,
 .vsl-player[data-state="idle"] .vsl-idle,
 .vsl-player[data-state="paused"]:not([data-pause-overlay="false"]) .vsl-paused,
+.vsl-player[data-state="paused"][data-pause-poster="on"] .vsl-pause-poster,
 .vsl-player[data-state="ended"]:not([data-end-screen="none"]) .vsl-ended,
 .vsl-player[data-state="modal"] .vsl-modal,
 .vsl-player[data-state="error"] .vsl-error,
@@ -95,43 +132,88 @@
   visibility: visible;
 }
 
-/* Caixa escura com ícone e texto ("Seu vídeo já começou", "Clique para continuar") */
+/* Com a miniatura de pausa ligada, a caixa "Continuar assistindo" some */
+.vsl-player[data-state="paused"][data-pause-poster="on"] .vsl-paused {
+  opacity: 0;
+  visibility: hidden;
+}
+
+/* Tela final com imagem e botão: a layer vira a imagem, sem ícone de replay */
+.vsl-player[data-state="ended"][data-end-screen="poster-cta"] .vsl-ended {
+  padding: 0;
+  background-color: #000;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.vsl-player[data-state="ended"][data-end-screen="poster-cta"] .vsl-ended .vsl-box { display: none; }
+
+/* Caixa escura com ícone e texto ("Seu vídeo já começou", "Continuar assistindo", erro) */
 .vsl-player .vsl-box {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: clamp(6px, 1.5cqw, 12px);
-  padding: clamp(14px, 4cqw, 28px) clamp(18px, 6cqw, 44px);
+  gap: clamp(8px, 1.5cqw, 12px);
+  width: auto;
   max-width: 92%;
-  border-radius: clamp(10px, 2cqw, 16px);
+  margin: 0;
+  padding: clamp(16px, 4cqw, 28px) clamp(22px, 6cqw, 44px);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: clamp(12px, 2cqw, 16px);
   background: var(--vsl-box-bg);
+  color: #fff;
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
   transition: transform 0.2s ease;
 }
 
-.vsl-player:hover .vsl-box { transform: scale(1.03); }
+/* O aviso de autoplay é um <button class="vsl-box">: reset para ficar igual ao <div> */
+.vsl-player button.vsl-box {
+  appearance: none;
+  -webkit-appearance: none;
+  font: inherit;
+  color: inherit;
+  text-align: center;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.vsl-player button.vsl-box:focus-visible,
+.vsl-player .vsl-btn:focus-visible,
+.vsl-player .vsl-cta:focus-visible,
+.vsl-player .vsl-fullscreen:focus-visible {
+  outline: 3px solid #fff;
+  outline-offset: 2px;
+}
+
+@media (hover: hover) {
+  .vsl-player:hover .vsl-box { transform: scale(1.03); }
+}
 
 .vsl-player .vsl-box strong {
-  font-size: clamp(14px, 3.6cqw, 26px);
+  font-size: clamp(17px, 4.6cqw, 26px);
   font-weight: 700;
   line-height: 1.2;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
 }
 
 .vsl-player .vsl-box .vsl-sub {
-  font-size: clamp(12px, 2.6cqw, 18px);
+  font-size: clamp(14px, 3cqw, 17px);
   opacity: 0.9;
 }
 
 .vsl-player .vsl-icon {
   position: relative;
   display: flex;
+  flex-shrink: 0;
   align-items: center;
   justify-content: center;
-  width: clamp(40px, 11cqw, 76px);
-  height: clamp(40px, 11cqw, 76px);
+  width: clamp(56px, 13cqw, 80px);
+  height: clamp(56px, 13cqw, 80px);
   border-radius: 50%;
   background: var(--vsl-color);
   color: #fff;
@@ -142,40 +224,47 @@
 .vsl-player .vsl-paused .vsl-icon svg,
 .vsl-player .vsl-ended .vsl-icon svg { margin-left: 4%; }
 
+/* Pulso do aviso: anel de 4 px na cor da marca que respira, e uma onda que se expande */
 .vsl-player .vsl-icon--pulse::before,
 .vsl-player .vsl-icon--pulse::after {
   content: "";
   position: absolute;
-  inset: 0;
+  inset: -8px;
   border-radius: 50%;
-  border: 2px solid var(--vsl-color);
-  animation: vsl-pulse 1.8s ease-out infinite;
+  border: 4px solid var(--vsl-color);
+  pointer-events: none;
 }
 
-.vsl-player .vsl-icon--pulse::after { animation-delay: 0.6s; }
+.vsl-player .vsl-icon--pulse::before { animation: vsl-ring 1.8s ease-in-out infinite; }
+.vsl-player .vsl-icon--pulse::after { animation: vsl-pulse 1.8s ease-out infinite; }
 
 /* Capa com botão de play (autoplay desligado ou bloqueado pelo aparelho) */
 .vsl-player .vsl-play-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: clamp(56px, 18cqw, 120px);
+  width: clamp(64px, 11cqw, 88px);
   aspect-ratio: 1;
   border-radius: 50%;
   background: var(--vsl-color);
   color: #fff;
-  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.45);
-  animation: vsl-breathe 2.2s ease-in-out infinite;
+  box-shadow: 0 0 0 8px rgba(255, 255, 255, 0.18), 0 10px 30px rgba(0, 0, 0, 0.4);
   transition: transform 0.2s ease;
 }
 
 .vsl-player .vsl-play-btn svg { width: 46%; height: 46%; margin-left: 7%; }
-.vsl-player[data-state="idle"]:hover .vsl-play-btn { transform: scale(1.06); }
+
+@media (hover: hover) {
+  .vsl-player[data-state="idle"]:hover .vsl-play-btn { transform: scale(1.06); }
+}
 
 .vsl-player .vsl-caption {
-  font-size: clamp(13px, 2.8cqw, 18px);
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.6);
+  font-size: clamp(13px, 2.6cqw, 15px);
   font-weight: 600;
-  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.7);
+  line-height: 1.3;
 }
 
 /* "Continuar de onde parou?" */
@@ -183,39 +272,62 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  width: min(92%, 440px);
+  width: min(88%, 420px);
   padding: clamp(16px, 5cqw, 32px);
-  border-radius: clamp(12px, 2.5cqw, 18px);
-  background: #fff;
-  color: #111;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 16px;
+  background: rgba(17, 17, 20, 0.88);
+  color: #fff;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   text-align: center;
-  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.55);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
   cursor: default;
 }
 
 .vsl-player .vsl-card strong {
-  font-size: clamp(15px, 3.4cqw, 22px);
+  font-size: clamp(17px, 3.6cqw, 22px);
+  font-weight: 700;
   line-height: 1.25;
 }
 
 .vsl-player .vsl-card p {
-  margin: 0 0 8px;
-  font-size: clamp(13px, 2.5cqw, 16px);
-  color: #555;
+  margin: 0 0 4px;
+  font-size: clamp(13px, 2.6cqw, 15px);
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.vsl-player .vsl-card-actions {
+  display: flex;
+  flex-direction: row;
+  gap: 10px;
+  width: 100%;
+  margin-top: 4px;
+}
+
+.vsl-player .vsl-card-actions .vsl-btn {
+  flex: 1 1 0;
+  width: auto;
+  min-width: 0;
 }
 
 .vsl-player .vsl-btn {
   appearance: none;
   -webkit-appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 100%;
+  min-height: 44px;
   margin: 0;
-  padding: clamp(10px, 2.5cqw, 14px) 16px;
+  padding: 12px 16px;
   border: 0;
-  border-radius: 10px;
+  border-radius: 12px;
   font: inherit;
-  font-size: clamp(13px, 2.6cqw, 16px);
+  font-size: 15px;
   font-weight: 700;
   line-height: 1.2;
+  text-align: center;
   cursor: pointer;
   transition: filter 0.15s ease, transform 0.1s ease;
 }
@@ -223,7 +335,75 @@
 .vsl-player .vsl-btn:hover { filter: brightness(1.08); }
 .vsl-player .vsl-btn:active { transform: scale(0.98); }
 .vsl-player .vsl-btn--primary { background: var(--vsl-color); color: #fff; }
-.vsl-player .vsl-btn--ghost { background: #f0f0f3; color: #333; }
+.vsl-player .vsl-btn--ghost { background: rgba(255, 255, 255, 0.12); color: #fff; }
+
+/* Erro: botão "Tentar de novo" abaixo do texto, ocupando a largura da caixa */
+.vsl-player .vsl-error .vsl-btn {
+  align-self: stretch;
+  width: auto;
+  margin-top: 4px;
+}
+
+/* Botão de compra sobre a miniatura de pausa ou a tela final (grade 3×3 por data-vsl-pos) */
+.vsl-player .vsl-cta {
+  position: absolute;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* max-content: a largura vem do texto (e não do espaço até a borda), até o limite das margens */
+  width: max-content;
+  max-width: calc(100% - 2 * var(--vsl-cta-margin));
+  min-height: 44px;
+  margin: 0;
+  padding: 12px 22px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--vsl-color);
+  color: #fff;
+  font-size: clamp(14px, 3cqw, 18px);
+  font-weight: 700;
+  line-height: 1.2;
+  text-align: center;
+  text-decoration: none;
+  white-space: normal;
+  cursor: pointer;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  transition: filter 0.15s ease;
+  /* padrão: bottom-center */
+  bottom: var(--vsl-cta-margin);
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.vsl-player .vsl-cta:hover { filter: brightness(1.08); }
+.vsl-player .vsl-cta:active { filter: brightness(0.94); }
+
+.vsl-player .vsl-cta[data-vsl-pos="top-left"],
+.vsl-player .vsl-cta[data-vsl-pos="top-center"],
+.vsl-player .vsl-cta[data-vsl-pos="top-right"] { top: var(--vsl-cta-margin); bottom: auto; }
+
+.vsl-player .vsl-cta[data-vsl-pos="center-left"],
+.vsl-player .vsl-cta[data-vsl-pos="center"],
+.vsl-player .vsl-cta[data-vsl-pos="center-right"] { top: 50%; bottom: auto; }
+
+.vsl-player .vsl-cta[data-vsl-pos="top-left"],
+.vsl-player .vsl-cta[data-vsl-pos="center-left"],
+.vsl-player .vsl-cta[data-vsl-pos="bottom-left"] { left: var(--vsl-cta-margin); right: auto; }
+
+.vsl-player .vsl-cta[data-vsl-pos="top-right"],
+.vsl-player .vsl-cta[data-vsl-pos="center-right"],
+.vsl-player .vsl-cta[data-vsl-pos="bottom-right"] { left: auto; right: var(--vsl-cta-margin); }
+
+.vsl-player .vsl-cta[data-vsl-pos="top-left"],
+.vsl-player .vsl-cta[data-vsl-pos="top-right"],
+.vsl-player .vsl-cta[data-vsl-pos="bottom-left"],
+.vsl-player .vsl-cta[data-vsl-pos="bottom-right"] { transform: none; }
+
+.vsl-player .vsl-cta[data-vsl-pos="center-left"],
+.vsl-player .vsl-cta[data-vsl-pos="center-right"] { transform: translateY(-50%); }
+
+.vsl-player .vsl-cta[data-vsl-pos="center"] { left: 50%; transform: translate(-50%, -50%); }
 
 /* Barra de progresso (não é clicável de propósito) */
 .vsl-player .vsl-progress {
@@ -249,38 +429,41 @@
 
 /* Carregando */
 .vsl-player .vsl-spinner {
-  width: clamp(32px, 8cqw, 56px);
-  height: clamp(32px, 8cqw, 56px);
-  border: 4px solid rgba(255, 255, 255, 0.25);
+  width: clamp(36px, 8cqw, 56px);
+  height: clamp(36px, 8cqw, 56px);
+  border: 4px solid rgba(255, 255, 255, 0.3);
   border-top-color: #fff;
   border-radius: 50%;
+  background: rgba(0, 0, 0, 0.25);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
   animation: vsl-spin 0.8s linear infinite;
 }
 
-/* Tela cheia (opcional) */
+/* Tela cheia (opcional) — alvo de toque de 44 px */
 .vsl-player .vsl-fullscreen {
   display: none;
   position: absolute;
   right: 10px;
-  bottom: calc(var(--vsl-progress-height) + 10px);
-  width: 36px;
-  height: 36px;
+  bottom: calc(var(--vsl-progress-height) + 8px);
+  width: 44px;
+  height: 44px;
+  margin: 0;
   padding: 0;
   border: 0;
-  border-radius: 8px;
+  border-radius: 10px;
   background: rgba(0, 0, 0, 0.55);
   color: #fff;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  opacity: 0.7;
+  opacity: 0.75;
   z-index: 6;
   transition: opacity 0.15s ease;
 }
 
 .vsl-player[data-fullscreen="true"] .vsl-fullscreen { display: flex; }
 .vsl-player .vsl-fullscreen:hover { opacity: 1; }
-.vsl-player .vsl-fullscreen svg { width: 20px; height: 20px; }
+.vsl-player .vsl-fullscreen svg { width: 22px; height: 22px; }
 
 .vsl-player:fullscreen {
   width: 100%;
@@ -295,54 +478,84 @@
 .vsl-player .vsl-review {
   position: absolute;
   left: 10px;
-  bottom: calc(var(--vsl-progress-height) + 10px);
+  bottom: calc(var(--vsl-progress-height) + 8px);
   display: flex;
   align-items: center;
   gap: 6px;
+  max-width: calc(100% - 20px);
   padding: 6px 8px;
-  border-radius: 8px;
+  border-radius: 10px;
   background: rgba(0, 0, 0, 0.7);
   color: #fff;
   font-size: 12px;
+  white-space: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
   z-index: 7;
   cursor: default;
 }
 
-.vsl-player .vsl-review-titulo { opacity: 0.8; margin-right: 4px; }
+.vsl-player .vsl-review::-webkit-scrollbar { display: none; }
+.vsl-player[data-fullscreen="true"] .vsl-review { max-width: calc(100% - 74px); }
+
+.vsl-player .vsl-review-titulo { flex-shrink: 0; opacity: 0.8; margin-right: 4px; }
 
 .vsl-player .vsl-review button,
 .vsl-player .vsl-review input {
+  flex-shrink: 0;
+  min-width: 44px;
+  min-height: 44px;
+  margin: 0;
   font: inherit;
   font-size: 12px;
   color: #fff;
   background: rgba(255, 255, 255, 0.12);
   border: 1px solid rgba(255, 255, 255, 0.25);
-  border-radius: 6px;
-  padding: 3px 7px;
+  border-radius: 8px;
+  padding: 3px 8px;
   cursor: pointer;
 }
 
-.vsl-player .vsl-review input { width: 60px; cursor: text; }
+.vsl-player .vsl-review input { width: 64px; cursor: text; }
 .vsl-player .vsl-review button.vsl-on { background: var(--vsl-color); border-color: var(--vsl-color); }
+
+/* Celular / player estreito */
+@container (max-width: 480px) {
+  /* sem padding na layer: a caixa (86%) e o card (88%) definem as próprias margens */
+  .vsl-player .vsl-layer { padding: 0; }
+  .vsl-player .vsl-box { max-width: 86%; min-width: 68%; }
+  .vsl-player .vsl-card-actions { flex-direction: column; }
+  .vsl-player .vsl-review { gap: 4px; padding: 4px 6px; font-size: 11px; }
+  .vsl-player .vsl-review button,
+  .vsl-player .vsl-review input { font-size: 11px; padding: 3px 6px; }
+  .vsl-player .vsl-review input { width: 56px; }
+}
+
+/* Player baixo (16:9 no celular): o modal cabe sem o subtítulo */
+@container (max-height: 240px) {
+  .vsl-player .vsl-card { padding: 14px; }
+  .vsl-player .vsl-card p { display: none; }
+}
 
 /* Elementos da página com delay: ficam escondidos até o vídeo chegar no tempo */
 [data-vsl-show-at]:not(.vsl-visible) { display: none !important; }
 [data-vsl-hide-at].vsl-hidden { display: none !important; }
 
-@keyframes vsl-pulse {
-  0% { transform: scale(1); opacity: 0.8; }
-  100% { transform: scale(1.9); opacity: 0; }
+@keyframes vsl-ring {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 0.95; }
 }
 
-@keyframes vsl-breathe {
-  0%, 100% { transform: scale(1); }
-  50% { transform: scale(1.07); }
+@keyframes vsl-pulse {
+  0% { transform: scale(1); opacity: 0.75; }
+  100% { transform: scale(1.6); opacity: 0; }
 }
 
 @keyframes vsl-spin { to { transform: rotate(360deg); } }
 
 @media (prefers-reduced-motion: reduce) {
-  .vsl-player .vsl-icon--pulse::before,
-  .vsl-player .vsl-icon--pulse::after,
-  .vsl-player .vsl-play-btn { animation: none; }
+  .vsl-player .vsl-icon--pulse::before { animation: none; opacity: 0.7; }
+  .vsl-player .vsl-icon--pulse::after { display: none; }
 }

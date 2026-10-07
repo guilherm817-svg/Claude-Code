@@ -9,7 +9,8 @@ mais cerca de 4 por minuto assistido com som (a cada 15 s, mais um ao tirar o mu
 e o painel aberto gasta 2 requisições por minuto. Na prática, uns 20 mil minutos assistidos por dia, por exemplo
 2 mil pessoas assistindo 10 minutos. Em sites maiores, suba `data-analytics-interval` para 30 ou 60 no player
 e, se precisar, o plano pago da Cloudflare (US$ 5/mês) multiplica os limites por 100 e dá 30 s de CPU por
-requisição (no grátis são 10 ms, suficientes para períodos com até uns 3 mil plays).
+requisição (no grátis são 10 ms). Para caber nesses 10 ms, quando o período tem mais de 2.000 plays a curva de
+retenção é calculada sobre uma amostra aleatória de 2.000 (o painel avisa; os outros números continuam exatos).
 
 ## Colocar no ar (um clique)
 
@@ -51,14 +52,30 @@ npx wrangler secret put TOKEN
 
 Para rodar no seu computador: `npm run dev` e abra http://localhost:8787.
 
+### Migrações do banco
+
+As migrações ficam em `migrations/` e o Worker as roda sozinho no primeiro acesso de cada instância, então o
+banco funciona mesmo sem `wrangler d1 migrations apply`. A `0003_navegador.sql` acrescenta a coluna
+`navegador` à tabela `sessoes` (`ALTER TABLE`); o Worker confere antes se a coluna já existe (`PRAGMA
+table_info`) e ignora o erro de coluna duplicada, por isso rodar de novo não quebra. Já a `wrangler d1
+migrations apply` não tolera o `ALTER` repetido: se o Worker novo receber um acesso antes dela, ela falha com
+`duplicate column name: navegador`. Nesse caso a coluna já está lá; basta marcar a migração como aplicada:
+
+```bash
+npx wrangler d1 execute DB --remote --command "INSERT OR IGNORE INTO d1_migrations (name) VALUES ('0003_navegador.sql')"
+```
+
+Para evitar isso, aplique a migração antes de publicar (`npx wrangler d1 migrations apply DB --remote` e só
+depois `npx wrangler deploy`).
+
 ## Diferenças em relação ao servidor Python
 
 - Cada sessão é uma linha no D1 e os eventos ficam contados em JSON dentro dela (uma gravação por envio, para
   caber no plano gratuito). Por isso a tabela de eventos conta repetições, sem deduplicar reenvios.
 - O pitch e a duração de cada player vêm da sessão mais recente que os informou.
 - As datas usam o fuso da variável `FUSO`; o Python usa o relógio do computador onde roda.
-- O CSV tem as mesmas 19 colunas do Python e mais uma no fim, `dia`, que é a data no fuso `FUSO` (o `inicio`
-  é em UTC).
+- O CSV tem as mesmas 20 colunas do Python (a última delas, `navegador`) e mais uma no fim, `dia`, que é a
+  data no fuso `FUSO` (o `inicio` é em UTC).
 - Cada sessão guarda até 50 tipos de evento diferentes.
 - Arredondamentos em empate exato (.5) podem diferir do Python em uma unidade da última casa decimal.
 - A rota de coleta é pública e sem limite de taxa, como no Python. Se alguém inundar o Worker, a proteção que

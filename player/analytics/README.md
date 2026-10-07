@@ -15,7 +15,8 @@ python player/analytics/servidor.py --porta 8080 --token um-segredo
 
 - Envios chegam em `http://localhost:8080/vsl`.
 - O painel abre em `http://localhost:8080/?token=um-segredo`.
-- Os dados ficam em `player/analytics/dados.sqlite` (mude com `--dados`).
+- Os dados ficam em `player/analytics/dados.sqlite` (mude com `--dados`). Um arquivo criado por uma versão
+  anterior ganha as colunas novas (hoje, `navegador`) sozinho ao abrir; abrir de novo não faz nada.
 - Sem `--token`, o painel fica aberto para quem acessar a porta. Defina um antes de publicar.
 - Por padrão só aceita conexões da própria máquina (`127.0.0.1`), o que basta com o Caddy abaixo. Para expor a
   porta direto (Docker, proxy em outra máquina, testar pelo celular na rede), rode com `--host 0.0.0.0`, sempre
@@ -53,12 +54,21 @@ Depois aponte o DNS de `analytics.seusite.com` para o servidor. Para manter o pr
 | **Plays** | sessões em que a pessoa clicou para ouvir (evento `unmute`). A taxa de play é plays ÷ visualizações. |
 | **Chegaram ao pitch** | plays que, com som, passaram do tempo definido em `data-pitch` do player daquela sessão. Em "Todos os players" cada sessão é julgada pelo pitch do seu player. Dá para forçar outro tempo com `?pitch=750` na API. |
 | **Terminaram o vídeo** | plays que receberam o evento `ended`. |
+| **Cliques no botão** | sessões com pelo menos um evento `cta_click` (o player emite ao clicar no botão da miniatura de pausa ou da tela final; `emit('cta_click')` também conta). A taxa (`taxa_clique`) é cliques ÷ chegaram ao pitch. |
+| **Erros** | sessões com pelo menos um evento `error` (o vídeo não carregou, mesmo depois das retentativas). A taxa (`taxa_erro`) é erros ÷ visualizações. |
+| **Funil** | visitas (sessões) → plays → pitch (chegaram ao pitch) → cliques, os mesmos números acima em sequência. |
 | **Tempo médio assistido** | média (e mediana) dos segundos assistidos com som por play, contando cada segundo uma só vez e nunca além da duração. |
-| **Curva de retenção** | para cada segundo do vídeo, a porcentagem dos plays que o assistiu com som. Vídeos longos são compactados em até 1.200 pontos. |
+| **Curva de retenção** | para cada segundo do vídeo, a porcentagem dos plays que o assistiu com som. Vídeos longos são compactados em até 1.200 pontos. Quando o período tem mais de 2.000 plays, a curva é calculada sobre uma amostra aleatória de 2.000 (`curva_amostrada: true`, `curva_n` é o tamanho da amostra); os demais números continuam exatos. |
 | **Por dia** | visualizações e plays por dia da primeira chegada da sessão. Os períodos prontos do painel (hoje, 7, 30 e 90 dias) são calculados pelo relógio do servidor, o mesmo que carimba as sessões. |
 | **Origens** | `utm_source` da URL da página ou, se não houver, o site de onde a pessoa veio (facebook, instagram, google, tiktok...). |
 | **Dispositivos** | celular ou computador, pelo `User-Agent`. |
+| **Navegadores** | pelo `User-Agent`: `Instagram`, `Facebook`, `TikTok` (navegadores embutidos dos apps), `Chrome WebView` (outros apps no Android), `Samsung`, `Edge`, `Firefox`, `Chrome`, `Safari` ou `Outro`. Sessões gravadas antes de o navegador ser guardado aparecem como `Desconhecido`. |
+| **Criativos** e **Campanhas** | por `utm_content` e `utm_campaign` da URL da página (até 12 de cada; o resto vira `outras`; sem a UTM, `(sem utm_content)` / `(sem utm_campaign)`). |
 | **Eventos** | contagem de todos os eventos recebidos, inclusive os seus: `VSLPlayer.get('id').emit('cta_click')` registra cliques no botão, por exemplo. |
+
+Origens, dispositivos, navegadores, criativos e campanhas têm as mesmas colunas: sessões, plays, chegaram ao
+pitch, terminaram e cliques. Com menos de 30 plays no período, a API devolve `amostra.pequena: true` e o painel
+avisa que os números ainda são ruído.
 
 Só conta o que foi visto com som: o trecho do autoplay mudo entra em *Visualizações*, mas não na retenção,
 nos tempos nem no pitch. O evento `pitch` listado na tabela de eventos é outra coisa: o player o dispara uma
@@ -74,11 +84,19 @@ aceita. `/vsl`, `/saude` e `/api/config` são públicas.
 |---|---|
 | `POST /vsl` | recebe o envio do player (JSON, mesmo com `Content-Type: text/plain`). Responde `204` com CORS liberado. |
 | `GET /` | o painel. |
-| `GET /api/resumo?player=&periodo=hoje|7|30|90|tudo&pitch=` | todos os números do painel em JSON. Em vez de `periodo`, dá para passar `de=AAAA-MM-DD&ate=AAAA-MM-DD`. Datas, período ou pitch inválidos respondem `400`. |
+| `GET /api/resumo?player=&periodo=hoje|7|30|90|tudo&pitch=&navegador=` | todos os números do painel em JSON. Em vez de `periodo`, dá para passar `de=AAAA-MM-DD&ate=AAAA-MM-DD`. `navegador=` filtra pelo nome exato da tabela de navegadores (`Instagram`, `Chrome WebView`, `Desconhecido`...; texto de até 40 caracteres). Datas, período, pitch ou navegador inválidos respondem `400`. |
 | `GET /api/players` | players conhecidos, com quantidade de sessões, pitch e duração. |
-| `GET /api/sessoes.csv?player=&periodo=` (ou `de`/`ate`) | sessões em CSV (separado por `;`, abre direto no Excel). Células de texto que começam com `=`, `+`, `-` ou `@` ganham um apóstrofo na frente, para a planilha não executá-las como fórmula. |
+| `GET /api/sessoes.csv?player=&periodo=&navegador=` (ou `de`/`ate`) | sessões em CSV (separado por `;`, abre direto no Excel), com a coluna `navegador` por último. Células de texto que começam com `=`, `+`, `-` ou `@` ganham um apóstrofo na frente, para a planilha não executá-las como fórmula. |
 | `GET /api/config` | diz se o painel pede token e a data de hoje no servidor. |
 | `GET /saude` | `{"ok": true}`. |
+
+Campos do JSON de `/api/resumo`: `sessoes`, `visitantes`, `plays`, `taxa_play`, `chegaram_pitch`, `taxa_pitch`,
+`terminaram`, `taxa_conclusao`, `cliques`, `taxa_clique`, `erros`, `taxa_erro`,
+`funil {visitas, plays, pitch, cliques}`, `amostra {plays, pequena}`, `tempo_medio`, `tempo_mediano`,
+`engajamento`, `duracao`, `pitch`, `pitch_misto`, `retencao {passo, pontos}`, `curva_amostrada`, `curva_n`,
+`por_dia`, `origens`, `dispositivos`, `navegadores`, `criativos`, `campanhas` (listas de
+`{nome, sessoes, plays, pitch, terminaram, cliques}`), `eventos`, e os filtros usados (`player`, `navegador`,
+`periodo`, `de`, `ate`, `hoje`).
 
 ## Limites e segurança
 

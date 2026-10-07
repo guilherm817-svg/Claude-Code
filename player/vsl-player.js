@@ -1,33 +1,44 @@
 /*!
- * VSL Player 1.0.0
+ * VSL Player 1.1.0
  * Player de vídeo para páginas de vendas (VSL), no estilo VTurb:
  *  - smart autoplay: começa mudo e pede o clique para ouvir (e recomeça com som);
  *  - barra de progresso inteligente, que anda rápido no começo e devagar no fim;
  *  - delay de elementos da página (botão de compra aparece no minuto certo);
  *  - "continuar de onde parou" entre visitas;
  *  - sem controles de avanço: clique pausa/retoma, velocidade e seek travados;
+ *  - miniatura de pausa e tela final com botão de compra (CTA);
+ *  - retentativa automática quando o vídeo falha, com botão "Tentar de novo";
  *  - eventos para pixels (Meta, GA4...) e envio de retenção para um endpoint seu.
- * Sem dependências. Licença MIT.
+ * Sem dependências (o hls.js é carregado sozinho quando o vídeo é .m3u8). Licença MIT.
  */
 (function (global, document) {
   'use strict';
 
   if (!global || !document) return;
 
-  const VERSION = '1.0.0';
+  const VERSION = '1.1.0';
   const STORAGE_PREFIX = 'vsl:';
   const MILESTONES = [10, 25, 50, 75, 90];
-  const FLUSH_NOW = ['unmute', 'ended', 'pitch'];
+  const FLUSH_NOW = ['unmute', 'ended', 'pitch', 'cta_click', 'error']; // eventos que saem na hora para o analytics
+  const RETRY_DELAYS = [1000, 3000, 8000]; // esperas entre as retentativas automáticas quando o vídeo falha
+  const HLS_TIMEOUT = 8000;                // quanto esperar o hls.js baixar antes de usar o fallback
+  const FIRST_FRAME_TIMEOUT = 12000;       // play() aceito mas sem imagem: volta para a capa depois disso
+  const FIRST_FRAME_TIME = 0.05;           // currentTime a partir do qual consideramos que há imagem na tela
+  const TAP_GUARD = 450;                   // ms ignorando toques depois do toque que liberou o som
+  const SOUND_LONG_AFTER = 5 * 60 * 1000;  // depois de 5 min com som, o analytics passa a enviar a cada 60 s
+  const TARGET_HEIGHT = 480;               // nível inicial do HLS: o mais perto desta altura
+  const POSITIONS = ['top-left', 'top-center', 'top-right', 'center-left', 'center', 'center-right', 'bottom-left', 'bottom-center', 'bottom-right'];
   const EVENTS = [
     'ready', 'autoplay', 'autoplay_blocked', 'unmute', 'play', 'pause', 'ended', 'replay',
     'progress', 'milestone', 'pitch', 'reach', 'resume_prompt', 'resume_continue', 'resume_restart',
-    'seek_blocked', 'fullscreen', 'review', 'state', 'error',
+    'seek_blocked', 'fullscreen', 'review', 'state', 'error', 'cta_click',
   ];
 
   const DEFAULTS = {
     id: '',                   // identificador do player (chave do localStorage e dos eventos)
     src: '',                  // MP4 ou .m3u8 (HLS)
     fallback: '',             // MP4 usado quando o navegador não toca HLS
+    hlsUrl: 'https://cdn.jsdelivr.net/npm/hls.js@1.5.20/dist/hls.light.min.js', // de onde baixar o hls.js, se precisar
     poster: '',               // imagem de capa
     aspect: 'auto',           // 16:9, 9:16, 4:3, 1:1... ou auto (usa a proporção do vídeo)
     color: '#e11d48',         // cor da barra de progresso e dos botões
@@ -38,39 +49,54 @@
     resumeMin: 10,            // só oferece retomar se o visitante passou de X segundos
     progress: 'smart',        // smart | real | none
     progressIntensity: 2.2,   // quanto maior, mais rápido a barra anda no começo
-    pauseOverlay: true,       // mostra "clique para continuar" quando pausado
+    pauseOverlay: true,       // mostra "continuar assistindo" quando pausado
     endScreen: 'replay',      // replay | poster | none
     lockSpeed: true,          // impede acelerar o vídeo (extensões, console)
     lockSeek: true,           // impede pular trechos (extensões, console)
+    speed: 1,                 // velocidade de reprodução (1 a 1.5); a trava mantém esta velocidade
     fullscreen: false,        // mostra o botão de tela cheia
     pitch: '',                // segundos (ou mm:ss) em que a oferta começa; dispara "pitch" uma vez
+    show: '',                 // seletores CSS ("#botao, .oferta") de elementos que aparecem em showAt
+    showAt: '',               // tempo em que os elementos de `show` aparecem; vazio = no pitch
+    pausePosterLate: '',      // imagem mostrada ao pausar depois do pitch (miniatura de pausa)
+    pauseCtaText: '',         // texto do botão sobre a miniatura de pausa
+    pauseCtaLink: '',         // link do botão (sem link, não há botão)
+    pauseCtaPos: 'bottom-center', // posição do botão: top-left ... bottom-right
+    endPoster: '',            // imagem da tela final (no lugar do "assistir de novo")
+    endCtaText: '',           // texto do botão da tela final
+    endCtaLink: '',           // link do botão da tela final
+    endCtaPos: 'bottom-center',
     analytics: '',            // URL que recebe os eventos e a retenção (POST, JSON)
-    analyticsInterval: 15,    // segundos entre os envios
+    analyticsInterval: 15,    // segundos entre os envios (com som)
     reviewKey: '',            // chave do modo de revisão: abra a página com ?revisar=CHAVE para acelerar e pular
     texts: {
       unmuteTitle: 'Seu vídeo já começou',
       unmuteSubtitle: 'Clique para ouvir',
       play: 'Clique para assistir',
-      pause: 'Clique para continuar assistindo',
-      replay: 'Assistir novamente',
-      resumeTitle: 'Você já começou a assistir este vídeo',
-      resumeSubtitle: 'Quer continuar de onde parou?',
-      resumeContinue: 'Continuar de onde parei',
-      resumeRestart: 'Começar do início',
-      error: 'Não foi possível carregar o vídeo.',
+      pause: 'Continuar assistindo',
+      replay: 'Assistir de novo',
+      resumeTitle: 'Continuar de onde parou?',
+      resumeSubtitle: 'Você parou em {time}',
+      resumeContinue: 'Continuar',
+      resumeRestart: 'Ver do início',
+      error: 'O vídeo não carregou',
+      retry: 'Tentar de novo',
       fullscreen: 'Tela cheia',
       review: 'Modo de revisão',
       reviewGo: 'Ir',
     },
   };
 
+  // Em telas de toque (sem mouse), "clique" vira "toque". Os data-* do HTML continuam valendo.
+  const TOUCH_TEXTS = { unmuteSubtitle: 'Toque para ouvir', play: 'Toque para assistir', pause: 'Toque para continuar' };
+
   // data-atributo de cada texto: data-unmute-title="..."
   const TEXT_ATTRS = {
     unmuteTitle: 'unmute-title', unmuteSubtitle: 'unmute-subtitle', play: 'play-text',
     pause: 'pause-text', replay: 'replay-text', resumeTitle: 'resume-title',
     resumeSubtitle: 'resume-subtitle', resumeContinue: 'resume-continue',
-    resumeRestart: 'resume-restart', error: 'error-text', fullscreen: 'fullscreen-label', review: 'review-text',
-    reviewGo: 'review-go',
+    resumeRestart: 'resume-restart', error: 'error-text', retry: 'retry-text', fullscreen: 'fullscreen-label',
+    review: 'review-text', reviewGo: 'review-go',
   };
 
   const ICONS = {
@@ -114,6 +140,16 @@
     const m = text.match(/^(?:(\d+)h)?\s*(?:(\d+)m)?\s*(?:(\d+)s)?$/);
     if (m && (m[1] || m[2] || m[3])) return (+m[1] || 0) * 3600 + (+m[2] || 0) * 60 + (+m[3] || 0);
     return null;
+  }
+
+  // 65 -> "1:05"; 3725 -> "1:02:05". Usado no "Você parou em {time}".
+  function formatTime(seconds) {
+    const total = Math.max(0, Math.floor(Number(seconds) || 0));
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const s = total % 60;
+    const pad = (n) => (n < 10 ? '0' : '') + n;
+    return h > 0 ? h + ':' + pad(m) + ':' + pad(s) : m + ':' + pad(s);
   }
 
   function hash(text) {
@@ -161,6 +197,12 @@
     return '16 / 9';
   }
 
+  function cssUrl(url) { return 'url("' + String(url).replace(/"/g, '%22') + '")'; }
+
+  function isTouch() {
+    try { return !!(global.matchMedia && global.matchMedia('(hover: none) and (pointer: coarse)').matches); } catch (e) { return false; }
+  }
+
   function readOptions(el) {
     const out = { texts: {} };
     Object.keys(DEFAULTS).forEach((key) => {
@@ -183,10 +225,41 @@
   function mergeOptions(el, options) {
     const data = readOptions(el);
     const merged = Object.assign({}, DEFAULTS, data, options || {});
-    merged.texts = Object.assign({}, DEFAULTS.texts, data.texts, (options && options.texts) || {});
+    merged.texts = Object.assign({}, DEFAULTS.texts, isTouch() ? TOUCH_TEXTS : {}, data.texts, (options && options.texts) || {});
     if (!(merged.progressIntensity > 0)) merged.progressIntensity = DEFAULTS.progressIntensity;
     if (!(merged.resumeMin >= 0)) merged.resumeMin = DEFAULTS.resumeMin;
+    const speed = Number(merged.speed);
+    merged.speed = clamp(speed > 0 ? speed : 1, 1, 1.5);
+    if (POSITIONS.indexOf(merged.pauseCtaPos) < 0) merged.pauseCtaPos = DEFAULTS.pauseCtaPos;
+    if (POSITIONS.indexOf(merged.endCtaPos) < 0) merged.endCtaPos = DEFAULTS.endCtaPos;
     return merged;
+  }
+
+  // Baixa o hls.js uma vez só, compartilhado entre os players da página. Resolve com window.Hls.
+  function loadHls(url) {
+    if (global.Hls) return Promise.resolve(global.Hls);
+    if (VSLPlayer._hlsLoading) return VSLPlayer._hlsLoading;
+    VSLPlayer._hlsLoading = new Promise((resolve, reject) => {
+      let done = false;
+      let timer = null;
+      const finish = (ok) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        if (ok && global.Hls) { resolve(global.Hls); return; }
+        VSLPlayer._hlsLoading = null; // a próxima tentativa injeta de novo
+        reject(new Error('hls-load'));
+      };
+      timer = setTimeout(() => finish(false), HLS_TIMEOUT);
+      const script = document.createElement('script');
+      script.src = url;
+      script.async = true;
+      script.setAttribute('data-vsl-hls', '1');
+      script.onload = () => finish(true);
+      script.onerror = () => finish(false);
+      (document.head || document.documentElement).appendChild(script);
+    });
+    return VSLPlayer._hlsLoading;
   }
 
   // ------------------------------------------------------------------ analytics
@@ -200,16 +273,38 @@
       this.dirty = false;
       this.maxTime = 0; // até onde ESTA sessão chegou com som (o `reached` do player atravessa visitas)
       this.seq = 0;     // distingue eventos emitidos no mesmo milissegundo
+      this.timer = null;
+      this.firstSent = false; // a sessão muda envia um único pacote (no ready/autoplay ou em até 3 s)
+      this.soundSince = 0;    // quando o som foi liberado: depois de 5 min o intervalo passa para 60 s
       if (!this.url) return;
       this.visitor = storage.get('visitor');
       if (!this.visitor) { this.visitor = uuid(); storage.set('visitor', this.visitor); }
       this.session = uuid();
-      const interval = Math.max(5, Number(player.opts.analyticsInterval) || DEFAULTS.analyticsInterval);
-      this.timer = setInterval(() => this.flush(), interval * 1000);
+      this.interval = Math.max(5, Number(player.opts.analyticsInterval) || DEFAULTS.analyticsInterval);
       this.onHide = () => this.flush();
       this.onVisibility = () => { if (document.visibilityState === 'hidden') this.flush(); };
       global.addEventListener('pagehide', this.onHide);
       document.addEventListener('visibilitychange', this.onVisibility);
+      this._schedule();
+    }
+
+    // Sessão muda: um envio só; o resto fica para o unmute ou o pagehide. Com som: a cada `interval` s (60 s depois de 5 min).
+    _schedule() {
+      clearTimeout(this.timer);
+      this.timer = null;
+      if (!this.player.unmuted) {
+        if (!this.firstSent) this.timer = setTimeout(() => this._sendFirst(), 3000);
+        return;
+      }
+      const longo = this.soundSince && Date.now() - this.soundSince >= SOUND_LONG_AFTER;
+      this.timer = setTimeout(() => { this.flush(); this._schedule(); }, (longo ? 60 : this.interval) * 1000);
+    }
+
+    _sendFirst() {
+      if (this.firstSent) return;
+      clearTimeout(this.timer);
+      this.timer = null;
+      if (this.flush()) this.firstSent = true; // sem nada na fila ainda, o próximo ready/autoplay envia
     }
 
     second(time) {
@@ -222,11 +317,13 @@
     track(type, detail) {
       if (!this.url) return;
       this.queue.push(Object.assign({ type, ts: Date.now(), time: round(this.player.currentTime), seq: this.seq++ }, plain(detail)));
+      if (type === 'unmute' && !this.soundSince) { this.soundSince = Date.now(); this._schedule(); }
       if (FLUSH_NOW.indexOf(type) >= 0) this.flush();
+      else if ((type === 'ready' || type === 'autoplay') && !this.player.unmuted) this._sendFirst();
     }
 
     flush() {
-      if (!this.url || (!this.queue.length && !this.dirty)) return;
+      if (!this.url || (!this.queue.length && !this.dirty)) return false;
       const payload = {
         v: VERSION,
         player: this.player.id,
@@ -238,6 +335,7 @@
         maxTime: round(this.maxTime),            // nesta sessão, com som
         reached: round(this.player.reached),     // entre visitas (inclui autoplay mudo)
         unmuted: this.player.unmuted,
+        muted: !this.player.unmuted,             // a sessão ainda está muda (nunca liberou o som)
         pitch: this.player._pitchAt == null ? null : this.player._pitchAt,
         watched: toRanges(this.watched), // segundos assistidos com som, acumulados na sessão (o servidor une)
         events: this.queue,
@@ -260,12 +358,13 @@
           }).catch(() => {});
         } catch (e) { /* sem rede */ }
       }
+      return true;
     }
 
     destroy() {
       if (!this.url) return;
       this.flush();
-      clearInterval(this.timer);
+      clearTimeout(this.timer);
       global.removeEventListener('pagehide', this.onHide);
       document.removeEventListener('visibilitychange', this.onVisibility);
     }
@@ -294,12 +393,20 @@
       this._pitchAt = parseTime(this.opts.pitch);
       this._pitchDone = storage.get(this.id + ':pitch') === '1';
       this._resumeAsked = false;
+      this._readyEmitted = false;
       this._lastTime = 0;
       this._lastSaved = -1;
       this._seekAllowed = false;
       this._pendingSeek = null;
       this._listeners = [];
       this._isFirst = VSLPlayer.instances.length === 0;
+      this._attempts = 0;          // retentativas automáticas já feitas desde a última falha
+      this._retryTimer = null;     // espera até a próxima retentativa
+      this._frameTimer = null;     // watchdog: play() aceito mas sem imagem
+      this._tapGuardUntil = 0;     // ignora o segundo toque do impaciente
+      this._errorCode = null;
+      this._hlsErrorType = null;
+      this._sourceAttached = false;
 
       VSLPlayer.instances.push(this);
       VSLPlayer.byId[this.id] = this;
@@ -309,8 +416,7 @@
       this._bindVideo();
       this._bindUI();
       this._bindElements();
-      this._attachSource();
-      this._boot();
+      this._attachSource(() => this._boot());
       if (this._modoRevisaoPedido()) this._ativarRevisao();
     }
 
@@ -362,6 +468,10 @@
 
     // -- montagem ------------------------------------------------------------
 
+    _cta(text, link, pos) {
+      return '<a class="vsl-cta" data-vsl-pos="' + esc(pos) + '" href="' + esc(link) + '" target="_top">' + esc(text || 'Saiba mais') + '</a>';
+    }
+
     _build() {
       const root = this.root;
       const o = this.opts;
@@ -371,7 +481,7 @@
       root.setAttribute('data-vsl-id', this.id);
       root.setAttribute('data-state', this.state);
       root.setAttribute('data-progress', o.progress);
-      root.setAttribute('data-end-screen', o.endScreen);
+      root.setAttribute('data-end-screen', o.endPoster ? 'poster-cta' : o.endScreen);
       root.setAttribute('data-pause-overlay', o.pauseOverlay ? 'true' : 'false');
       root.setAttribute('data-fullscreen', o.fullscreen ? 'true' : 'false');
       root.setAttribute('tabindex', '0');
@@ -380,37 +490,46 @@
       root.style.setProperty('--vsl-color', o.color);
       root.style.setProperty('--vsl-aspect', cssAspect(o.aspect));
 
+      const replayBox = '<div class="vsl-box"><span class="vsl-icon">' + ICONS.replay + '</span><strong>' + esc(t.replay) + '</strong></div>';
       root.innerHTML =
         '<video class="vsl-video" playsinline webkit-playsinline preload="' + esc(o.preload) + '" ' +
         'disablepictureinpicture disableremoteplayback controlslist="nodownload noplaybackrate noremoteplayback"></video>' +
         '<div class="vsl-layer vsl-poster"></div>' +
-        '<div class="vsl-layer vsl-unmute"><div class="vsl-box">' +
+        '<div class="vsl-layer vsl-unmute"><button type="button" class="vsl-box" aria-label="' + esc(t.unmuteTitle + '. ' + t.unmuteSubtitle) + '">' +
         '<span class="vsl-icon vsl-icon--pulse">' + ICONS.muted + '</span>' +
-        '<strong>' + esc(t.unmuteTitle) + '</strong><span class="vsl-sub">' + esc(t.unmuteSubtitle) + '</span></div></div>' +
+        '<strong>' + esc(t.unmuteTitle) + '</strong><span class="vsl-sub">' + esc(t.unmuteSubtitle) + '</span></button></div>' +
         '<div class="vsl-layer vsl-idle"><div class="vsl-play-btn">' + ICONS.play + '</div>' +
         '<span class="vsl-caption">' + esc(t.play) + '</span></div>' +
         '<div class="vsl-layer vsl-paused"><div class="vsl-box"><span class="vsl-icon">' + ICONS.play + '</span>' +
         '<strong>' + esc(t.pause) + '</strong></div></div>' +
-        '<div class="vsl-layer vsl-ended"><div class="vsl-box"><span class="vsl-icon">' + ICONS.replay + '</span>' +
-        '<strong>' + esc(t.replay) + '</strong></div></div>' +
+        '<div class="vsl-layer vsl-pause-poster">' + (o.pauseCtaLink ? this._cta(o.pauseCtaText, o.pauseCtaLink, o.pauseCtaPos) : '') + '</div>' +
+        '<div class="vsl-layer vsl-ended">' + (o.endPoster && o.endCtaLink ? this._cta(o.endCtaText, o.endCtaLink, o.endCtaPos) : replayBox) + '</div>' +
         '<div class="vsl-layer vsl-error"><div class="vsl-box"><span class="vsl-icon">' + ICONS.warning + '</span>' +
-        '<strong>' + esc(t.error) + '</strong></div></div>' +
+        '<strong>' + esc(t.error) + '</strong>' +
+        '<button type="button" class="vsl-btn vsl-btn--primary" data-vsl-action="retry">' + esc(t.retry) + '</button></div></div>' +
         '<div class="vsl-layer vsl-loading"><div class="vsl-spinner"></div></div>' +
         '<div class="vsl-layer vsl-modal"><div class="vsl-card" role="dialog" aria-modal="true">' +
         '<strong>' + esc(t.resumeTitle) + '</strong><p>' + esc(t.resumeSubtitle) + '</p>' +
+        '<div class="vsl-card-actions">' +
         '<button type="button" class="vsl-btn vsl-btn--primary" data-vsl-action="continue">' + esc(t.resumeContinue) + '</button>' +
         '<button type="button" class="vsl-btn vsl-btn--ghost" data-vsl-action="restart">' + esc(t.resumeRestart) + '</button>' +
-        '</div></div>' +
+        '</div></div></div>' +
         '<div class="vsl-progress" aria-hidden="true"><div class="vsl-progress-bar"></div></div>' +
         '<button type="button" class="vsl-fullscreen" aria-label="' + esc(t.fullscreen) + '">' + ICONS.fullscreen + '</button>';
 
       this.video = root.querySelector('.vsl-video');
       this.bar = root.querySelector('.vsl-progress-bar');
       this.posterLayer = root.querySelector('.vsl-poster');
+      this.modalText = root.querySelector('.vsl-card p');
       if (o.poster) {
         this.video.setAttribute('poster', o.poster);
-        this.posterLayer.style.backgroundImage = 'url("' + o.poster.replace(/"/g, '%22') + '")';
+        this.posterLayer.style.backgroundImage = cssUrl(o.poster);
       }
+      if (o.pausePosterLate) root.querySelector('.vsl-pause-poster').style.backgroundImage = cssUrl(o.pausePosterLate);
+      if (o.endPoster) root.querySelector('.vsl-ended').style.backgroundImage = cssUrl(o.endPoster);
+      // Velocidade manual: defaultPlaybackRate sobrevive ao load() das retentativas.
+      this.video.defaultPlaybackRate = o.speed;
+      this.video.playbackRate = o.speed;
     }
 
     _preconectar(src) {
@@ -425,41 +544,57 @@
       (document.head || document.documentElement).appendChild(link);
     }
 
-    _attachSource() {
+    // Liga o vídeo à fonte e chama `done` quando houver fonte (pode ser depois, se o hls.js precisar baixar).
+    _attachSource(done) {
       const v = this.video;
       const src = this.opts.src;
       this._preconectar(src);
       const isHls = /\.m3u8(\?|#|$)/i.test(src);
-      if (!isHls) { v.src = src; return; }
-      if (v.canPlayType('application/vnd.apple.mpegurl')) { v.src = src; return; }
-      const Hls = global.Hls;
-      if (Hls && Hls.isSupported()) {
-        // startLevel 0: o vídeo começa na hora, na qualidade mais leve, e sobe assim que a conexão permite.
+      if (!isHls || v.canPlayType('application/vnd.apple.mpegurl')) { v.src = src; this._sourceAttached = true; done(); return; }
+      const fallback = (code) => {
+        if (this.opts.fallback) { v.src = this.opts.fallback; this._sourceAttached = true; done(); return; }
+        this._onError(code);
+      };
+      const attach = (Hls) => {
+        if (!Hls || !Hls.isSupported()) { fallback('hls-unsupported'); return; }
+        // startLevel 0: o vídeo começa na hora, na qualidade mais leve; no manifesto escolhemos o nível perto de 480p.
         this.hls = new Hls(Object.assign({ startLevel: 0, capLevelToPlayerSize: true, maxBufferLength: 60 }, this.opts.hlsConfig || {}));
-        this.hls.on(Hls.Events.ERROR, (_, data) => { if (data && data.fatal) this._onError(data.type); });
+        this.hls.on(Hls.Events.MANIFEST_PARSED, (_, data) => {
+          if (!this.hls) return;
+          this.hls.startLevel = this._nivelInicial((data && data.levels) || this.hls.levels);
+        });
+        this.hls.on(Hls.Events.ERROR, (_, data) => { if (data && data.fatal) this._onError(data.details || data.type, data.type); });
         this.hls.loadSource(src);
         this.hls.attachMedia(v);
-        return;
-      }
-      if (this.opts.fallback) { v.src = this.opts.fallback; return; }
-      this._onError('hls-unsupported');
+        this._sourceAttached = true;
+        done();
+      };
+      if (global.Hls) { attach(global.Hls); return; }
+      loadHls(this.opts.hlsUrl).then(attach, () => fallback('hls-load'));
+    }
+
+    // Nível do HLS cuja altura (o menor lado, para vídeo vertical) fica mais perto de 480. Sem medidas, 0.
+    _nivelInicial(levels) {
+      let best = 0;
+      let bestDiff = Infinity;
+      (levels || []).forEach((level, i) => {
+        const h = Number(level && level.height) || 0;
+        const w = Number(level && level.width) || 0;
+        const lado = h > 0 && w > 0 ? Math.min(h, w) : (h || w);
+        if (!(lado > 0)) return;
+        const diff = Math.abs(lado - TARGET_HEIGHT);
+        if (diff < bestDiff) { bestDiff = diff; best = i; }
+      });
+      return best;
     }
 
     _boot() {
       const v = this.video;
       if (!this.opts.autoplay) { this._setState('idle'); return; }
+      if (this.state !== 'loading') return;
       v.muted = true;
       v.setAttribute('muted', '');
-      let promise;
-      try { promise = v.play(); } catch (e) { promise = Promise.reject(e); }
-      if (promise && promise.then) {
-        promise.then(() => { if (this.state !== 'error') this._setState(v.muted ? 'autoplaying' : 'playing'); }).catch(() => {
-          // Autoplay bloqueado (ex.: iPhone em modo de economia de energia): mostra a capa com o play.
-          if (this.state === 'error') return;
-          this._setState('idle');
-          this.emit('autoplay_blocked');
-        });
-      }
+      this._play(); // fica em loading até o primeiro quadro; bloqueado pelo aparelho -> idle + autoplay_blocked
     }
 
     // -- eventos do <video> --------------------------------------------------
@@ -477,11 +612,12 @@
           this.root.style.setProperty('--vsl-aspect', v.videoWidth + ' / ' + v.videoHeight);
         }
         if (this._pendingSeek != null) { const t = this._pendingSeek; this._pendingSeek = null; this._seek(t); }
-        this.emit('ready', { duration: v.duration });
+        if (!this._readyEmitted) { this._readyEmitted = true; this.emit('ready', { duration: v.duration }); }
       });
       this._listen(v, 'durationchange', () => { this.duration = v.duration; });
-      this._listen(v, 'play', () => { if (this.state !== 'error') this._setState(v.muted ? 'autoplaying' : 'playing'); });
-      this._listen(v, 'playing', () => this.root.classList.remove('vsl-buffering'));
+      // Em `loading` o estado só muda com imagem na tela (primeiro quadro), não no play().
+      this._listen(v, 'play', () => { if (this.state !== 'error' && this.state !== 'loading') this._setState(v.muted ? 'autoplaying' : 'playing'); });
+      this._listen(v, 'playing', () => { this.root.classList.remove('vsl-buffering'); this._firstFrame(); });
       this._listen(v, 'canplay', () => this.root.classList.remove('vsl-buffering'));
       this._listen(v, 'waiting', () => this.root.classList.add('vsl-buffering'));
       this._listen(v, 'pause', () => {
@@ -491,12 +627,25 @@
         this._setState('paused');
       });
       this._listen(v, 'ended', () => this._onEnded());
-      this._listen(v, 'timeupdate', () => this._onTime());
+      this._listen(v, 'timeupdate', () => { this._firstFrame(); this._onTime(); });
       this._listen(v, 'seeking', () => this._onSeeking());
       this._listen(v, 'seeked', () => { this._seekAllowed = false; this._lastTime = v.currentTime; });
-      this._listen(v, 'ratechange', () => { if (this.opts.lockSpeed && v.playbackRate !== 1) v.playbackRate = 1; });
+      this._listen(v, 'ratechange', () => { if (this.opts.lockSpeed && v.playbackRate !== this.opts.speed) v.playbackRate = this.opts.speed; });
       this._listen(v, 'error', () => this._onError(v.error && v.error.code));
+      this._listen(document, 'visibilitychange', () => this._checkPitch());
       this._listen(global, 'pagehide', () => this._persist(true));
+    }
+
+    // Primeiro quadro na tela: sai de `loading` e cancela o watchdog.
+    _firstFrame() {
+      if (this.state !== 'loading' || this._retryTimer) return; // com retentativa pendente, espera ela acontecer
+      const v = this.video;
+      if (v.paused || !(v.currentTime > FIRST_FRAME_TIME)) return;
+      clearTimeout(this._frameTimer);
+      this._frameTimer = null;
+      this._attempts = 0; // voltou a tocar: a próxima falha ganha retentativas novas
+      this.root.classList.remove('vsl-buffering');
+      this._setState(v.muted ? 'autoplaying' : 'playing');
     }
 
     _onTime() {
@@ -515,12 +664,19 @@
           if (percent >= m && !this._milestones.has(m)) { this._milestones.add(m); this.emit('milestone', { percent: m }); }
         });
       }
-      if (this._pitchAt != null && !this._pitchDone && t >= this._pitchAt) {
-        this._pitchDone = true;
-        storage.set(this.id + ':pitch', '1');
-        this.emit('pitch', { at: this._pitchAt });
-      }
+      this._checkPitch();
       this.emit('progress', { time: t, duration: d, percent: d > 0 ? (t / d) * 100 : 0 });
+    }
+
+    // O pitch só conta com som e com a aba visível. Se o tempo passou mudo, fica pendente até a condição valer.
+    _checkPitch() {
+      if (this._pitchAt == null || this._pitchDone) return;
+      const v = this.video;
+      if (v.muted || !(v.currentTime >= this._pitchAt)) return;
+      if (document.visibilityState && document.visibilityState !== 'visible') return;
+      this._pitchDone = true;
+      storage.set(this.id + ':pitch', '1');
+      this.emit('pitch', { at: this._pitchAt, time: round(v.currentTime), muted: false });
     }
 
     _onSeeking() {
@@ -541,10 +697,58 @@
       this.emit('ended');
     }
 
-    _onError(code) {
-      if (this.state === 'error') return;
+    // -- erro, retentativas e saída -----------------------------------------
+
+    // Falha do vídeo: até 3 retentativas automáticas (1 s, 3 s, 8 s) em `loading`; só depois `error`.
+    _onError(code, hlsType) {
+      if (this.state === 'error' || this._retryTimer) return;
+      this._errorCode = code == null ? 'unknown' : code;
+      this._hlsErrorType = hlsType || null;
+      clearTimeout(this._frameTimer);
+      this._frameTimer = null;
+      if (code === 'hls-unsupported' || this._attempts >= RETRY_DELAYS.length) { this._fail(); return; }
+      const delay = RETRY_DELAYS[this._attempts];
+      this._attempts++;
+      this.root.classList.add('vsl-buffering');
+      this._setState('loading');
+      this._retryTimer = setTimeout(() => { this._retryTimer = null; this._retry(); }, delay);
+    }
+
+    _retry() {
+      const v = this.video;
+      this.root.classList.add('vsl-buffering');
+      this._setState('loading');
+      if (this.hls) {
+        const Hls = global.Hls;
+        const tipos = (Hls && Hls.ErrorTypes) || {};
+        const ultimoRecurso = this._attempts >= RETRY_DELAYS.length;
+        if (!ultimoRecurso && this._hlsErrorType === tipos.NETWORK_ERROR) { this.hls.startLoad(); this._play(); return; }
+        if (!ultimoRecurso && this._hlsErrorType === tipos.MEDIA_ERROR) { this.hls.recoverMediaError(); this._play(); return; }
+        this.hls.destroy();
+        this.hls = null;
+        this._sourceAttached = false;
+      }
+      if (!this._sourceAttached) { this._attachSource(() => this._resumeAfterRetry()); return; }
+      v.load(); // nativo: recarrega a fonte; volta para onde estava quando os metadados chegarem
+      this._resumeAfterRetry();
+    }
+
+    _resumeAfterRetry() {
+      const v = this.video;
+      if (this._lastTime > 0) this._pendingSeek = this._lastTime;
+      v.muted = !this.unmuted; // mudo se ainda não liberou o som; com som se já liberou
+      if (v.muted) v.setAttribute('muted', ''); else v.removeAttribute('muted');
+      this._play();
+    }
+
+    _fail() {
+      clearTimeout(this._retryTimer);
+      this._retryTimer = null;
+      this.root.classList.remove('vsl-buffering');
       this._setState('error');
-      this.emit('error', { code: code == null ? 'unknown' : code });
+      // Fail-open: o botão de compra nunca fica escondido por falha do vídeo.
+      this._showAt.forEach((item) => { item.el.classList.add('vsl-visible'); item.el.removeAttribute('hidden'); });
+      this.emit('error', { code: this._errorCode, attempt: this._attempts });
     }
 
     _persist(force) {
@@ -583,16 +787,25 @@
       const previous = this.state;
       this.state = state;
       this.root.setAttribute('data-state', state);
+      if (state !== 'loading') { clearTimeout(this._frameTimer); this._frameTimer = null; }
+      this._renderPausePoster();
       if (state === 'autoplaying') this.emit('autoplay');
       else if (state === 'playing') this.emit('play', { resumed: previous === 'paused' });
       else if (state === 'paused') this.emit('pause');
       this.emit('state', { state, previous });
     }
 
+    // Miniatura de pausa: só pausado, com imagem configurada e depois do pitch (sem pitch, em qualquer pausa).
+    _renderPausePoster() {
+      const depoisDoPitch = this.currentTime >= (this._pitchAt == null ? 0 : this._pitchAt);
+      if (this.state === 'paused' && this.opts.pausePosterLate && depoisDoPitch) this.root.setAttribute('data-pause-poster', 'on');
+      else this.root.removeAttribute('data-pause-poster');
+    }
+
     _bindUI() {
       const root = this.root;
       this._listen(root, 'click', (e) => {
-        if (e.target.closest('[data-vsl-action], .vsl-fullscreen, .vsl-card')) return;
+        if (e.target.closest('[data-vsl-action], .vsl-fullscreen, .vsl-card, .vsl-cta')) return;
         this._onTap();
       });
       this._listen(root, 'keydown', (e) => {
@@ -604,7 +817,15 @@
       root.querySelectorAll('[data-vsl-action]').forEach((btn) => {
         this._listen(btn, 'click', (e) => {
           e.stopPropagation();
-          this._onResumeChoice(btn.getAttribute('data-vsl-action'));
+          this._onAction(btn.getAttribute('data-vsl-action'));
+        });
+      });
+      // Botão de compra (CTA): não pausa nem reinicia, deixa o link seguir e avisa o analytics na hora.
+      root.querySelectorAll('.vsl-cta').forEach((a) => {
+        this._listen(a, 'click', (e) => {
+          e.stopPropagation();
+          const where = a.closest('.vsl-pause-poster') ? 'pause' : 'end';
+          this.emit('cta_click', { where, link: a.getAttribute('href') });
         });
       });
       this._listen(root.querySelector('.vsl-fullscreen'), 'click', (e) => { e.stopPropagation(); this.toggleFullscreen(); });
@@ -613,12 +834,22 @@
       });
     }
 
+    _onAction(action) {
+      if (action === 'retry') { this.retry(); return; }
+      this._onResumeChoice(action);
+    }
+
     _onTap() {
+      const now = Date.now();
+      if (now < this._tapGuardUntil) return; // segundo toque logo depois de liberar o som: não pausa
       switch (this.state) {
         case 'loading':
         case 'idle':
+          this._startWithSound();
+          break;
         case 'autoplaying':
           this._startWithSound();
+          if (this.state === 'playing') this._tapGuardUntil = now + TAP_GUARD;
           break;
         case 'playing':
           this.pause();
@@ -629,6 +860,9 @@
         case 'ended':
           this.restart();
           break;
+        case 'error':
+          this.retry();
+          break;
         default:
           break;
       }
@@ -638,6 +872,7 @@
       const saved = this.opts.resume ? this._savedPosition() : 0;
       if (saved >= Math.max(1, this.opts.resumeMin) && !this._resumeAsked) {
         this._resumeAsked = true;
+        this.modalText.textContent = String(this.opts.texts.resumeSubtitle).replace('{time}', formatTime(saved));
         this._setState('modal');
         this.video.pause();
         this.emit('resume_prompt', { time: saved });
@@ -674,29 +909,67 @@
       let promise;
       try { promise = v.play(); } catch (e) { promise = Promise.reject(e); }
       if (this.state === 'error') return;
-      this._setState(v.muted ? 'autoplaying' : 'playing');
+      if (this.state === 'loading') this._awaitFrame(); // só sai de loading com imagem na tela
+      else this._setState(v.muted ? 'autoplaying' : 'playing');
       if (promise && promise.catch) {
-        promise.catch(() => {
-          if (!v.paused || this.state === 'error') return;
+        promise.catch((err) => {
+          // AbortError: outro play()/pause()/load() tomou a frente. NotSupportedError: o evento `error` cuida.
+          const name = err && err.name;
+          if (name === 'AbortError' || name === 'NotSupportedError') return;
+          if (!v.paused || ['loading', 'autoplaying', 'playing'].indexOf(this.state) < 0) return;
+          clearTimeout(this._frameTimer);
+          this._frameTimer = null;
           this._setState('idle');
           this.emit('autoplay_blocked');
         });
       }
     }
 
+    // play() aceito: se em 12 s não aparecer imagem, volta para a capa com o play (sem derrubar o <video>).
+    _awaitFrame() {
+      this.root.classList.add('vsl-buffering');
+      clearTimeout(this._frameTimer);
+      this._frameTimer = setTimeout(() => {
+        this._frameTimer = null;
+        if (this.state !== 'loading') return;
+        clearTimeout(this._retryTimer);
+        this._retryTimer = null;
+        this._attempts = 0;
+        this.root.classList.remove('vsl-buffering');
+        try { this.video.pause(); } catch (e) { /* ignora */ }
+        this._setState('idle');
+        this.emit('autoplay_blocked', { reason: 'no-frame' });
+      }, FIRST_FRAME_TIMEOUT);
+    }
+
     // -- elementos da página com delay ---------------------------------------
 
     _bindElements() {
+      const root = this.root;
       const mine = (el) => {
+        if (el === root || root.contains(el)) return false; // o próprio player pode ter data-show-at
         const owner = el.getAttribute('data-vsl-player');
         return owner ? owner === this.id : this._isFirst;
       };
+      // data-show="#botao, .oferta": os elementos casados viram data-vsl-show-at no showAt (ou no pitch).
+      const showAt = parseTime(this.opts.showAt);
+      const at = showAt != null ? showAt : this._pitchAt;
+      if (this.opts.show && at != null) {
+        let alvos = [];
+        try { alvos = Array.from(document.querySelectorAll(this.opts.show)); } catch (e) { console.error('VSLPlayer: data-show inválido: ' + this.opts.show); }
+        alvos.forEach((el) => {
+          if (el === root || root.contains(el)) return;
+          if (!el.hasAttribute('data-vsl-show-at')) el.setAttribute('data-vsl-show-at', String(at));
+          if (!el.hasAttribute('data-vsl-player')) el.setAttribute('data-vsl-player', this.id);
+        });
+      }
       const collect = (attr) => Array.from(document.querySelectorAll('[' + attr + ']'))
         .filter(mine)
         .map((el) => ({ el, at: parseTime(el.getAttribute(attr)), done: false }))
         .filter((item) => item.at != null);
       this._showAt = collect('data-vsl-show-at');
       this._hideAt = collect('data-vsl-hide-at');
+      if (this.state === 'error') this._showAt.forEach((item) => item.el.classList.add('vsl-visible')); // fail-open também para quem chegou depois
       this._applyElements(this.reached, true);
     }
 
@@ -748,6 +1021,14 @@
 
     restart() { this.emit('replay'); this._playWithSound(0); }
 
+    // Tenta carregar o vídeo de novo (botão "Tentar de novo" ou toque na tela de erro); zera o contador.
+    retry() {
+      clearTimeout(this._retryTimer);
+      this._retryTimer = null;
+      this._attempts = 0;
+      this._retry();
+    }
+
     seek(time) { this._seek(clamp(parseTime(time) || 0, 0, this.duration || Infinity)); }
 
     refreshElements() { this._bindElements(); }
@@ -769,6 +1050,8 @@
     destroy() {
       this.tracker.destroy();
       clearTimeout(this._seekTimer);
+      clearTimeout(this._retryTimer);
+      clearTimeout(this._frameTimer);
       this._listeners.forEach(([target, type, fn]) => target.removeEventListener(type, fn));
       this._listeners = [];
       if (this.hls) { this.hls.destroy(); this.hls = null; }
@@ -776,6 +1059,7 @@
       this.video.load();
       this.root.innerHTML = '';
       this.root.removeAttribute('data-vsl-ready');
+      this.root.removeAttribute('data-pause-poster');
       delete this.root.vslPlayer;
       VSLPlayer.instances = VSLPlayer.instances.filter((p) => p !== this);
       delete VSLPlayer.byId[this.id];
@@ -792,7 +1076,9 @@
   VSLPlayer.instances = [];
   VSLPlayer.byId = {};
   VSLPlayer._preconectados = {};
+  VSLPlayer._hlsLoading = null;
   VSLPlayer.parseTime = parseTime;
+  VSLPlayer.formatTime = formatTime;
   VSLPlayer.create = (el, options) => new VSLPlayer(el, options);
   VSLPlayer.get = (id) => VSLPlayer.byId[id] || null;
 

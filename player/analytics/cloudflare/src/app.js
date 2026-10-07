@@ -6,6 +6,7 @@
  *   GET  /                         o painel
  *   GET  /api/config | /saude      públicos
  *   GET  /api/players | /api/resumo | /api/sessoes.csv   pedem o TOKEN, se houver
+ *   (filtros de /api/resumo e /api/sessoes.csv: player, periodo ou de/ate, navegador; /api/resumo aceita pitch)
  *
  * Diferenças por causa do D1: cada sessão é uma linha e os eventos ficam contados em JSON dentro dela
  * (uma escrita por envio); o pitch e a duração de cada player vêm da sessão mais recente dele.
@@ -21,6 +22,10 @@ export const MAX_SEGUNDOS = 24 * 3600;
 export const MAX_TS = 2 ** 53;
 export const MAX_DIAS = 400;
 export const PONTOS_CURVA = 1200;
+export const AMOSTRA_CURVA = 2000;        // acima disso plays com som, a curva de retenção sai de uma amostra
+export const PLAYS_POUCOS = 30;           // abaixo disso o painel avisa que os números ainda são ruído
+export const MAX_NAVEGADOR = 40;          // tamanho máximo do filtro navegador=
+export const NAVEGADOR_DESCONHECIDO = 'Desconhecido'; // como as sessões sem navegador ('' , anteriores à migração 0003) aparecem
 export const FUSO_PADRAO = 'America/Sao_Paulo';
 
 const CAMINHOS_COLETA = new Set(['/vsl', '/coletar', '/']);
@@ -39,11 +44,13 @@ const ORIGENS_CONHECIDAS = [
   [/(^|\.)whatsapp\.com$/, 'whatsapp'],
   [/(^|\.)linkedin\.com$/, 'linkedin'],
 ];
-// As 19 primeiras colunas são as mesmas do servidor Python; `dia` (no fuso FUSO) vai no fim.
+// As 20 primeiras colunas são as mesmas do servidor Python; `dia` (no fuso FUSO) vai no fim.
 const COLUNAS_CSV = ['sessao', 'player', 'visitante', 'inicio', 'ultimo', 'origem', 'utm_source', 'utm_medium',
   'utm_campaign', 'utm_content', 'utm_term', 'dispositivo', 'url', 'referrer', 'duracao', 'max_tempo', 'segundos',
-  'com_som', 'terminou', 'dia'];
-const COLUNAS_RESUMO = 'player, visitante, dia, origem, dispositivo, com_som, terminou, max_tempo, duracao, segundos, assistido, eventos';
+  'com_som', 'terminou', 'navegador', 'dia'];
+// Sem `assistido`: a curva de retenção lê essa coluna numa consulta própria (só dos plays, e amostrada quando são muitos).
+const COLUNAS_RESUMO = 'player, visitante, dia, origem, dispositivo, navegador, utm_content, utm_campaign, com_som, terminou, '
+  + 'max_tempo, duracao, segundos, eventos';
 
 // ----------------------------------------------------------------------------- cálculos
 
@@ -122,6 +129,28 @@ export function compactarCurva(curva, maximo = PONTOS_CURVA) {
 }
 
 export const dispositivo = (userAgent) => (/Mobi|Android|iPhone|iPad|iPod/i.test(userAgent || '') ? 'celular' : 'computador');
+
+// Navegador pelo User-Agent. A ordem importa: os apps (Instagram, Facebook, TikTok) e as WebViews do Android trazem
+// "Chrome" e "Safari" no UA, Samsung e Edge também. O que sobra com "Chrome" é o Chrome; só "Safari" é o Safari.
+// Mesma lista e mesma ordem do servidor Python (servidor.py: NAVEGADORES).
+const NAVEGADORES = [
+  [/Instagram/i, 'Instagram'],
+  [/FBAN\/|FBAV\/|FB_IAB\/|FBIOS/, 'Facebook'],
+  [/TikTok|musical_ly|BytedanceWebview|trill_/i, 'TikTok'],
+  [/Android.*(; wv\)|Version\/\d[\d.]* +Chrome\/)/, 'Chrome WebView'],
+  [/SamsungBrowser\//, 'Samsung'],
+  [/Edg(e|A|iOS)?\//, 'Edge'],
+  [/Firefox\/|FxiOS\//, 'Firefox'],
+  [/Chrome\/|CriOS\//, 'Chrome'],
+  [/Safari\//, 'Safari'],
+];
+
+/** 'Instagram' | 'Facebook' | 'TikTok' | 'Chrome WebView' | 'Samsung' | 'Edge' | 'Firefox' | 'Chrome' | 'Safari' | 'Outro'. */
+export function navegador(userAgent) {
+  const ua = typeof userAgent === 'string' ? userAgent : '';
+  for (const [padrao, nome] of NAVEGADORES) if (padrao.test(ua)) return nome;
+  return 'Outro';
+}
 
 export function utms(url) {
   let params;
@@ -243,11 +272,12 @@ export async function registrar(db, dados, userAgent = '', fuso = FUSO_PADRAO, a
       const faixas = envio.faixas;
       const marcas = utms(envio.url);
       const r = await db.prepare('INSERT INTO sessoes (sessao, player, visitante, url, referrer, origem, utm_source, utm_medium, '
-        + 'utm_campaign, utm_content, utm_term, dispositivo, user_agent, inicio, dia, ultimo, duracao, max_tempo, com_som, terminou, '
-        + 'assistido, segundos, pitch, eventos) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(sessao) DO NOTHING')
+        + 'utm_campaign, utm_content, utm_term, dispositivo, navegador, user_agent, inicio, dia, ultimo, duracao, max_tempo, com_som, '
+        + 'terminou, assistido, segundos, pitch, eventos) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) '
+        + 'ON CONFLICT(sessao) DO NOTHING')
         .bind(envio.sessao, envio.player, envio.visitante, envio.url, envio.referrer, origem(marcas.utm_source, envio.referrer),
           marcas.utm_source, marcas.utm_medium, marcas.utm_campaign, marcas.utm_content, marcas.utm_term, dispositivo(userAgent),
-          texto(userAgent, 500), momento, hojeNoFuso(fuso, agora), momento, envio.duracao,
+          navegador(userAgent), texto(userAgent, 500), momento, hojeNoFuso(fuso, agora), momento, envio.duracao,
           Math.min(envio.maxTempo, fimDasFaixas(faixas)), envio.comSom, envio.terminou, JSON.stringify(faixas),
           limitarSegundos(faixas, envio.duracao), envio.pitch, JSON.stringify(envio.eventos))
         .run();
@@ -292,12 +322,15 @@ async function atualizarPlayer(db, envio, momento, novas) {
     .bind(envio.player, envio.pitch, envio.duracao, momento, momento, novas).run();
 }
 
-function filtro(player, de, ate) {
+// Tudo por parâmetro ligado (?): player e navegador vêm da URL do painel, nunca entram no texto do SQL.
+function filtro(player, de, ate, navegador = null) {
   const condicoes = [];
   const params = [];
   if (player) { condicoes.push('player = ?'); params.push(player); }
   if (de) { condicoes.push('dia >= ?'); params.push(de); }
   if (ate) { condicoes.push('dia <= ?'); params.push(ate); }
+  // "Desconhecido" é como o painel mostra as sessões sem navegador (gravadas antes da migração 0003)
+  if (navegador) { condicoes.push('navegador = ?'); params.push(navegador === NAVEGADOR_DESCONHECIDO ? '' : navegador); }
   return { where: condicoes.length ? ' WHERE ' + condicoes.join(' AND ') : '', params };
 }
 
@@ -338,16 +371,17 @@ export async function players(db) {
   return results.map((p) => ({ player: p.player, pitch: p.pitch ?? null, duracao: p.duracao || 0, primeiro: p.primeiro, ultimo: p.ultimo, sessoes: p.sessoes }));
 }
 
-export async function sessoes(db, { player, de, ate } = {}) {
-  const { where, params } = filtro(player, de, ate);
+export async function sessoes(db, { player, de, ate, navegador } = {}) {
+  const { where, params } = filtro(player, de, ate, navegador);
   return (await db.prepare('SELECT * FROM sessoes' + where + ' ORDER BY inicio').bind(...params).all()).results;
 }
 
 /** Métricas do painel para um player e um período (datas AAAA-MM-DD inclusivas, ou um `periodo` nomeado). */
-export async function resumo(db, { player = null, de = null, ate = null, pitch = null, periodo = null } = {}, fuso = FUSO_PADRAO, agora = new Date()) {
+export async function resumo(db, { player = null, de = null, ate = null, pitch = null, periodo = null, navegador = null } = {},
+  fuso = FUSO_PADRAO, agora = new Date()) {
   const hoje = hojeNoFuso(fuso, agora);
   if (periodo) [de, ate] = periodoParaDatas(periodo, hoje);
-  const { where, params } = filtro(player, de, ate);
+  const { where, params } = filtro(player, de, ate, navegador);
   const [{ results: linhas }, config] = await Promise.all([
     db.prepare('SELECT ' + COLUNAS_RESUMO + ' FROM sessoes' + where).bind(...params).all(),
     configDosPlayers(db, player),
@@ -383,7 +417,34 @@ export async function resumo(db, { player = null, de = null, ate = null, pitch =
   };
   const arredondar = (n, casas) => Math.round(n * 10 ** casas) / 10 ** casas;
 
-  const { passo, pontos } = compactarCurva(curvaRetencao(plays.map((s) => JSON.parse(s.assistido)), duracao));
+  // Curva de retenção: lê só `assistido`, e só dos plays. Acima de AMOSTRA_CURVA plays, usa uma amostra aleatória
+  // (paliativo para o limite de CPU do plano gratuito); os números dos tiles continuam exatos.
+  const curvaAmostrada = plays.length > AMOSTRA_CURVA;
+  let listas = [];
+  if (plays.length) {
+    const sqlCurva = 'SELECT assistido FROM sessoes' + where + (where ? ' AND' : ' WHERE') + ' com_som = 1'
+      + (curvaAmostrada ? ' ORDER BY RANDOM() LIMIT ' + AMOSTRA_CURVA : '');
+    listas = (await db.prepare(sqlCurva).bind(...params).all()).results.map((l) => JSON.parse(l.assistido));
+  }
+  const { passo, pontos } = compactarCurva(curvaRetencao(listas, duracao));
+
+  // Eventos: contagem por tipo e, por sessão, se houve clique no botão (cta_click) e erro do vídeo (error).
+  const eventos = Object.create(null);
+  for (const s of linhas) {
+    let contagem = {};
+    try { contagem = JSON.parse(s.eventos || '{}'); } catch (e) { contagem = {}; }
+    if (!contagem || typeof contagem !== 'object' || Array.isArray(contagem)) contagem = {};
+    const vezes = (tipo) => (Object.prototype.hasOwnProperty.call(contagem, tipo) ? Number(contagem[tipo]) || 0 : 0);
+    s.clicou = vezes('cta_click') > 0 ? 1 : 0;
+    s.errou = vezes('error') > 0 ? 1 : 0;
+    for (const [tipo, n] of Object.entries(contagem)) {
+      const e = eventos[tipo] || (eventos[tipo] = { tipo, total: 0, sessoes: 0 });
+      e.total += Number(n) || 0;
+      e.sessoes += 1;
+    }
+  }
+  const cliques = linhas.reduce((n, s) => n + s.clicou, 0);
+  const erros = linhas.reduce((n, s) => n + s.errou, 0);
 
   const porDia = Object.create(null);
   for (const s of linhas) {
@@ -404,37 +465,32 @@ export async function resumo(db, { player = null, de = null, ate = null, pitch =
     }
   }
 
-  const agrupar = (chave, limite) => {
+  // Tabelas por origem, dispositivo, navegador, criativo e campanha: {nome, sessoes, plays, pitch, terminaram, cliques}.
+  // `vazio` é o nome mostrado quando a coluna está em branco; acima de `limite` grupos, o resto vira "outras".
+  const CHAVES_GRUPO = ['sessoes', 'plays', 'pitch', 'terminaram', 'cliques'];
+  const agrupar = (chave, limite = null, vazio = '') => {
     const grupos = Object.create(null);
     for (const s of linhas) {
-      const g = grupos[s[chave]] || (grupos[s[chave]] = { nome: s[chave], sessoes: 0, plays: 0, pitch: 0, terminaram: 0 });
+      const nome = s[chave] || vazio;
+      const g = grupos[nome] || (grupos[nome] = { nome, sessoes: 0, plays: 0, pitch: 0, terminaram: 0, cliques: 0 });
       g.sessoes += 1;
       g.plays += s.com_som ? 1 : 0;
       g.pitch += chegou(s) ? 1 : 0;
       g.terminaram += s.com_som && s.terminou ? 1 : 0;
+      g.cliques += s.clicou;
     }
     let lista = Object.values(grupos).sort((a, b) => b.sessoes - a.sessoes || (a.nome < b.nome ? -1 : a.nome > b.nome ? 1 : 0));
     if (limite && lista.length > limite) {
-      const resto = { nome: 'outras', sessoes: 0, plays: 0, pitch: 0, terminaram: 0 };
-      for (const g of lista.slice(limite)) for (const k of ['sessoes', 'plays', 'pitch', 'terminaram']) resto[k] += g[k];
+      const resto = { nome: 'outras', sessoes: 0, plays: 0, pitch: 0, terminaram: 0, cliques: 0 };
+      for (const g of lista.slice(limite)) for (const k of CHAVES_GRUPO) resto[k] += g[k];
       lista = lista.slice(0, limite).concat([resto]);
     }
     return lista;
   };
 
-  const eventos = Object.create(null);
-  for (const s of linhas) {
-    let contagem = {};
-    try { contagem = JSON.parse(s.eventos || '{}'); } catch (e) { contagem = {}; }
-    for (const [tipo, n] of Object.entries(contagem)) {
-      const e = eventos[tipo] || (eventos[tipo] = { tipo, total: 0, sessoes: 0 });
-      e.total += Number(n) || 0;
-      e.sessoes += 1;
-    }
-  }
-
   return {
     player,
+    navegador,
     periodo: periodo || (de || ate ? 'custom' : 'tudo'),
     de,
     ate,
@@ -450,25 +506,36 @@ export async function resumo(db, { player = null, de = null, ate = null, pitch =
     taxa_pitch: plays.length ? arredondar(chegaramPitch.length / plays.length, 4) : 0,
     terminaram: terminaram.length,
     taxa_conclusao: plays.length ? arredondar(terminaram.length / plays.length, 4) : 0,
+    cliques,
+    taxa_clique: chegaramPitch.length ? arredondar(cliques / chegaramPitch.length, 4) : 0,
+    erros,
+    taxa_erro: linhas.length ? arredondar(erros / linhas.length, 4) : 0,
+    funil: { visitas: linhas.length, plays: plays.length, pitch: chegaramPitch.length, cliques },
+    amostra: { plays: plays.length, pequena: plays.length < PLAYS_POUCOS },
     tempo_medio: arredondar(media(tempos), 1),
     tempo_mediano: arredondar(mediana(tempos), 1),
     engajamento: arredondar(media(engajamentos), 4),
     retencao: { passo, pontos },
+    curva_amostrada: curvaAmostrada,
+    curva_n: listas.length,
     por_dia: Object.values(porDia).sort((a, b) => (a.dia < b.dia ? -1 : 1)),
-    origens: agrupar('origem', 12),
+    origens: agrupar('origem', 12, 'direto'),
     dispositivos: agrupar('dispositivo'),
+    navegadores: agrupar('navegador', null, NAVEGADOR_DESCONHECIDO),
+    criativos: agrupar('utm_content', 12, '(sem utm_content)'),
+    campanhas: agrupar('utm_campaign', 12, '(sem utm_campaign)'),
     eventos: Object.values(eventos).sort((a, b) => b.total - a.total),
   };
 }
 
-export async function csv(db, { player = null, de = null, ate = null, periodo = null } = {}, fuso = FUSO_PADRAO, agora = new Date()) {
+export async function csv(db, { player = null, de = null, ate = null, periodo = null, navegador = null } = {}, fuso = FUSO_PADRAO, agora = new Date()) {
   if (periodo) [de, ate] = periodoParaDatas(periodo, hojeNoFuso(fuso, agora));
   const escapar = (v) => {
     const t = v == null ? '' : String(v);
     return /[;"\n\r]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
   };
   const linhas = [COLUNAS_CSV.join(';')];
-  for (const s of await sessoes(db, { player, de, ate })) linhas.push(COLUNAS_CSV.map((c) => escapar(celula(s[c]))).join(';'));
+  for (const s of await sessoes(db, { player, de, ate, navegador })) linhas.push(COLUNAS_CSV.map((c) => escapar(celula(s[c]))).join(';'));
   return linhas.join('\n') + '\n';
 }
 
@@ -505,18 +572,46 @@ function autorizado(request, url, token) {
   return iguais(enviado, token);
 }
 
-/** Cria o app. `painel` é o HTML do painel; `esquema` é o SQL da migração; `env` traz DB (D1), TOKEN e FUSO. */
+const ADICIONAR_COLUNA = /^ALTER\s+TABLE\s+(\w+)\s+ADD\s+(?:COLUMN\s+)?(\w+)\b/i;
+
+/** Se a tabela já tem a coluna, pelo PRAGMA table_info. Sem PRAGMA disponível, responde false e o ALTER decide. */
+async function temColuna(db, tabela, coluna) {
+  try {
+    const { results } = await db.prepare('PRAGMA table_info(' + tabela + ')').all(); // `tabela` vem do nosso SQL (\w+), não do visitante
+    return (results || []).some((l) => l.name === coluna);
+  } catch (e) {
+    return false;
+  }
+}
+
+/**
+ * Roda um comando do esquema de forma idempotente. CREATE ... IF NOT EXISTS já é; ALTER TABLE ... ADD COLUMN não
+ * (a segunda vez dá "duplicate column name"), e ele roda em toda instância nova do Worker e também na
+ * `wrangler d1 migrations apply`. Por isso confere antes pelo PRAGMA e, se mesmo assim a coluna já existir
+ * (duas instâncias ao mesmo tempo), ignora o erro de coluna duplicada.
+ */
+export async function rodarComandoDoEsquema(db, comando) {
+  const m = ADICIONAR_COLUNA.exec(comando);
+  if (m && await temColuna(db, m[1], m[2])) return;
+  try {
+    await db.prepare(comando).run();
+  } catch (erro) {
+    if (!m || !/duplicate column/i.test((erro && erro.message) || '')) throw erro;
+  }
+}
+
+/** Cria o app. `painel` é o HTML do painel; `esquema` é o SQL das migrações; `env` traz DB (D1), TOKEN e FUSO. */
 export function criarApp({ painel, esquema = '' }) {
-  // O esquema é garantido na primeira requisição de cada instância (CREATE TABLE IF NOT EXISTS é barato),
-  // para o Worker funcionar mesmo quando a migração não rodou no deploy.
+  // O esquema é garantido na primeira requisição de cada instância (CREATE TABLE IF NOT EXISTS é barato e o
+  // ALTER TABLE só roda se a coluna faltar), para o Worker funcionar mesmo quando a migração não rodou no deploy.
   // Cada comando vai num prepare() próprio: o exec() do D1 quebra o SQL por linha e não aceita comandos de várias linhas.
   const comandos = esquema.split(';').map((c) => c.replace(/--[^\n]*/g, '').trim()).filter(Boolean);
   let esquemaPronto = null;
   const garantirEsquema = (db) => {
     if (!comandos.length || !db || typeof db.prepare !== 'function') return Promise.resolve();
     if (!esquemaPronto) {
-      // em sequência: o índice só compila depois que a tabela existe
-      esquemaPronto = (async () => { for (const c of comandos) await db.prepare(c).run(); })()
+      // em sequência: o índice só compila depois que a tabela existe, e o ALTER depois do CREATE
+      esquemaPronto = (async () => { for (const c of comandos) await rodarComandoDoEsquema(db, c); })()
         .catch((erro) => { esquemaPronto = null; throw erro; });
     }
     return esquemaPronto;
@@ -569,13 +664,19 @@ export function criarApp({ painel, esquema = '' }) {
     if ((valor('de') && !de) || (valor('ate') && !ate)) return json(400, { erro: 'de e ate precisam estar no formato AAAA-MM-DD' });
     const periodo = valor('periodo') || null;
     if (periodo && periodo !== 'tudo' && !(periodo in PERIODOS)) return json(400, { erro: 'periodo precisa ser hoje, 7, 30, 90 ou tudo' });
+    // navegador=: texto de até MAX_NAVEGADOR caracteres (ex.: Instagram, Chrome WebView, Desconhecido); só entra ligado (?)
+    const navegadorPedido = valor('navegador');
+    const navegador = texto(navegadorPedido, MAX_NAVEGADOR) || null;
+    if (navegadorPedido && (navegadorPedido.length > MAX_NAVEGADOR || !navegador)) {
+      return json(400, { erro: 'navegador precisa ser um texto de ate ' + MAX_NAVEGADOR + ' caracteres' });
+    }
     if (caminho === '/api/resumo') {
       const pitch = valor('pitch') ? pitchValido(valor('pitch')) : null;
       if (valor('pitch') && pitch == null) return json(400, { erro: 'pitch precisa ser um numero de segundos' });
-      return json(200, await resumo(env.DB, { player, de, ate, pitch, periodo }, fuso));
+      return json(200, await resumo(env.DB, { player, de, ate, pitch, periodo, navegador }, fuso));
     }
     const seguro = (player || 'todos').replace(/[^A-Za-z0-9._-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 60) || 'todos';
-    return resposta(200, '﻿' + await csv(env.DB, { player, de, ate, periodo }, fuso),
+    return resposta(200, '﻿' + await csv(env.DB, { player, de, ate, periodo, navegador }, fuso),
       { tipo: 'text/csv; charset=utf-8', extras: { 'Content-Disposition': `attachment; filename="sessoes-${seguro}.csv"` } });
   }
 

@@ -9,18 +9,21 @@ Abra `index.html` para ver a demonstração.
 
 | Recurso | Como funciona |
 |---|---|
-| **Smart autoplay** | O vídeo começa sozinho, mudo, com a mensagem "Seu vídeo já começou · Clique para ouvir". Ao clicar, volta para o início com som (igual ao VTurb). |
-| **Capa com play** | Se o aparelho bloquear o autoplay (iPhone em modo de economia de energia, por exemplo), mostra a capa com um botão de play. |
+| **Smart autoplay** | O vídeo começa sozinho, mudo, com a mensagem "Seu vídeo já começou · Clique para ouvir" (no celular, "Toque para ouvir"). Ao clicar, volta para o início com som (igual ao VTurb). A mensagem só aparece quando há imagem na tela de verdade; antes disso fica a capa com um spinner. |
+| **Capa com play** | Se o aparelho bloquear o autoplay (iPhone em modo de economia de energia, por exemplo) ou se o vídeo não mostrar imagem em 12 s, mostra a capa com um botão de play. O primeiro toque já toca com som. |
 | **Barra de progresso inteligente** | Anda rápido no começo e devagar no fim, para o vídeo parecer mais curto. Não dá para clicar nela. |
-| **Delay de elementos** | Qualquer elemento da página com `data-vsl-show-at="12:30"` fica escondido até o vídeo chegar nesse tempo. Também há `data-vsl-hide-at`. Se a pessoa recarregar a página, o elemento continua visível. |
-| **Continuar de onde parou** | Quem volta à página vê "Você já começou a assistir este vídeo. Quer continuar de onde parou?" com os botões *Continuar* e *Começar do início*. |
+| **Delay de elementos** | Qualquer elemento da página com `data-vsl-show-at="12:30"` fica escondido até o vídeo chegar nesse tempo. Também há `data-vsl-hide-at`. Ou, sem mexer no HTML do botão, `data-show="#botao-oferta"` no próprio player. Se a pessoa recarregar a página, o elemento continua visível. |
+| **Continuar de onde parou** | Quem volta à página vê "Continuar de onde parou? · Você parou em 7:32" com os botões *Continuar* e *Ver do início*. |
 | **Sem controles** | Não há linha do tempo, nem botão de avançar. Clique pausa, clique retoma. Velocidade e pulos pelo console ou por extensões são desfeitos. Sem botão de download e sem menu do botão direito. |
-| **Pausa com mensagem** | Ao pausar aparece "Clique para continuar assistindo". No fim, "Assistir novamente". |
-| **Pitch** | `data-pitch="12:30"` dispara o evento `pitch` uma vez por visitante quando a oferta começa. |
-| **Eventos para pixels** | `play`, `unmute`, `pitch`, `milestone` (10/25/50/75/90/100 %), `ended`... prontos para o Meta Pixel, GA4, TikTok etc. |
+| **Pausa com mensagem** | Ao pausar aparece "Continuar assistindo". No fim, "Assistir de novo". |
+| **Miniatura de pausa e tela final com botão** | Depois do pitch, a pausa pode mostrar uma imagem com um botão de compra (`data-pause-poster-late`). No fim do vídeo, uma imagem com o botão no lugar do "assistir de novo" (`data-end-poster`). |
+| **Pitch** | `data-pitch="12:30"` dispara o evento `pitch` uma vez por visitante quando a oferta começa, com som e com a aba visível. |
+| **Vídeo que falha** | Se o vídeo não carregar (link errado, CDN fora, rede caiu), o player tenta de novo sozinho três vezes (1 s, 3 s, 8 s) e só então mostra "O vídeo não carregou" com o botão "Tentar de novo". Nessa hora os elementos com delay são liberados: o botão de compra nunca fica escondido por falha do vídeo. |
+| **Velocidade manual** | `data-speed="1.2"` toca o vídeo um pouco mais rápido (até 1.5x), e a trava mantém essa velocidade. |
+| **Eventos para pixels** | `play`, `unmute`, `pitch`, `milestone` (10/25/50/75/90/100 %), `cta_click`, `ended`... prontos para o Meta Pixel, GA4, TikTok etc. |
 | **Retenção** | Opcionalmente envia para uma URL sua os eventos e os segundos assistidos de cada visitante. A pasta `analytics/` traz um servidor pronto com painel de retenção. |
-| **HLS** | Aceita `.m3u8` (nativo no Safari; nos outros navegadores com o hls.js). |
-| **Celular** | Toca dentro da página (sem abrir o player do sistema), textos e botões escalam com a largura do player. Botão de tela cheia opcional. |
+| **HLS** | Aceita `.m3u8` (nativo no Safari; nos outros navegadores o player baixa o hls.js sozinho). |
+| **Celular** | Toca dentro da página (sem abrir o player do sistema), textos e botões escalam com a largura do player. Ignora o segundo toque de quem toca duas vezes seguidas. Botão de tela cheia opcional. |
 
 ## Instalação
 
@@ -37,10 +40,17 @@ bloco num elemento de **HTML personalizado** da sua página (Atomicat, Elementor
      data-src="https://seu-cdn.com/vsl.mp4"
      data-poster="https://seu-cdn.com/capa.jpg"
      data-color="#e11d48"
-     data-pitch="12:30"></div>
+     data-pitch="12:30"
+     data-show="#botao-oferta"></div>
 
 <script src="https://cdn.jsdelivr.net/gh/guilherm817-svg/Claude-Code@f8381a0cab1124a65b2d0b50196784c41ce66235/player/vsl-player.js"></script>
+<script>setTimeout(function(){if(!window.VSLPlayer)document.querySelectorAll('[data-vsl-show-at]').forEach(function(e){e.classList.add('vsl-visible')})},10000)</script>
 ```
+
+É **um `<script>` do player só**: se o vídeo for `.m3u8`, o hls.js é baixado pelo próprio player quando
+precisa. `data-show="#botao-oferta"` esconde o botão de compra da página (pelo seletor CSS) até o pitch, sem
+precisar editar o HTML do botão. A última linha é a garantia (*fail-open*): se o script do player não
+carregar em 10 s, os elementos com delay aparecem mesmo assim.
 
 O endereço está preso a uma versão específica (o código depois do `@`), então ele nunca muda debaixo de você.
 Para pegar uma versão nova, troque esse código pelo da versão desejada.
@@ -63,6 +73,7 @@ Copie `vsl-player.js` e `vsl-player.css` para o seu site e cole na página:
 <a class="botao-comprar" data-vsl-show-at="12:30" href="https://pay.exemplo.com/...">COMPRAR AGORA</a>
 
 <script src="vsl-player.js"></script>
+<script>setTimeout(function(){if(!window.VSLPlayer)document.querySelectorAll('[data-vsl-show-at]').forEach(function(e){e.classList.add('vsl-visible')})},10000)</script>
 ```
 
 O script inicia sozinho todos os `<div class="vsl-player">` da página. Dê um `data-id` fixo a cada player: ele é a
@@ -93,31 +104,49 @@ Todas vão como `data-...` no `div` (ou como objeto em `VSLPlayer.create(el, { .
 | `data-progress` | `smart` | `smart` (inteligente), `real` ou `none`. |
 | `data-progress-intensity` | `2.2` | Quanto maior, mais rápido a barra anda no começo. `1` é igual à real. |
 | `data-pause-overlay` | `true` | Mensagem ao pausar. |
-| `data-end-screen` | `replay` | No fim: `replay` (botão de assistir de novo), `poster` (capa + botão) ou `none`. |
+| `data-end-screen` | `replay` | No fim: `replay` (botão de assistir de novo), `poster` (capa + botão) ou `none`. Com `data-end-poster`, vira a tela final com botão (abaixo). |
 | `data-lock-speed` | `true` | Desfaz mudanças de velocidade. |
 | `data-lock-seek` | `true` | Desfaz pulos no vídeo. |
+| `data-speed` | `1` | Velocidade de reprodução, de `1` a `1.5` (Turbo manual). A trava de velocidade mantém esse valor. |
 | `data-fullscreen` | `false` | Botão de tela cheia no canto. |
-| `data-pitch` | | Tempo da oferta (`750`, `12:30` ou `12m30s`). Dispara o evento `pitch` uma vez por visitante. |
+| `data-pitch` | | Tempo da oferta (`750`, `12:30` ou `12m30s`). Dispara o evento `pitch` uma vez por visitante, com som e aba visível. |
+| `data-show` | | Seletores CSS (`#botao-oferta, .oferta`) de elementos da página que ficam escondidos até `data-show-at`. Os elementos são tratados como se tivessem `data-vsl-show-at`. |
+| `data-show-at` | = `data-pitch` | Tempo em que os elementos de `data-show` aparecem (`12:30`). Sem ele, usa o pitch. |
+| `data-pause-poster-late` | | Imagem mostrada ao pausar **depois do pitch** (miniatura de pausa). Sem `data-pitch`, em qualquer pausa. |
+| `data-pause-cta-text` | | Texto do botão sobre a miniatura de pausa. |
+| `data-pause-cta-link` | | Link do botão. Sem link, não há botão (só a imagem). |
+| `data-pause-cta-pos` | `bottom-center` | Posição do botão: `top-left`, `top-center`, `top-right`, `center-left`, `center`, `center-right`, `bottom-left`, `bottom-center`, `bottom-right`. |
+| `data-end-poster` | | Imagem da tela final. Com ela, o fim mostra a imagem e o botão no lugar do "assistir de novo" (toque fora do botão reinicia). |
+| `data-end-cta-text` | | Texto do botão da tela final. |
+| `data-end-cta-link` | | Link do botão da tela final. |
+| `data-end-cta-pos` | `bottom-center` | Posição do botão da tela final (mesmos valores acima). |
 | `data-preload` | `auto` | `auto`, `metadata` ou `none`. |
-| `data-fallback` | | MP4 usado se o navegador não tocar o `.m3u8`. |
+| `data-fallback` | | MP4 usado se o navegador não tocar o `.m3u8` ou se o hls.js não baixar em 8 s. |
+| `data-hls-url` | jsDelivr, `hls.js@1.5.20` light | De onde baixar o hls.js quando o vídeo é `.m3u8` e a página não o carregou antes. |
 | `data-analytics` | | URL que recebe os eventos e a retenção (veja abaixo). |
-| `data-analytics-interval` | `15` | Segundos entre os envios. |
+| `data-analytics-interval` | `15` | Segundos entre os envios enquanto o vídeo toca com som (depois de 5 min com som, passa a 60 s). |
 | `data-review-key` | | Chave do modo de revisão: abrindo a página com `?revisar=CHAVE`, aparece uma barra para acelerar (até 3x) e pular para um minuto. Só para você conferir a página; o visitante continua sem controles. |
 
 ### Textos
 
-| Atributo | Padrão |
-|---|---|
-| `data-unmute-title` | Seu vídeo já começou |
-| `data-unmute-subtitle` | Clique para ouvir |
-| `data-play-text` | Clique para assistir |
-| `data-pause-text` | Clique para continuar assistindo |
-| `data-replay-text` | Assistir novamente |
-| `data-resume-title` | Você já começou a assistir este vídeo |
-| `data-resume-subtitle` | Quer continuar de onde parou? |
-| `data-resume-continue` | Continuar de onde parei |
-| `data-resume-restart` | Começar do início |
-| `data-error-text` | Não foi possível carregar o vídeo. |
+Todos sem ponto final e sobrescrevíveis pelo `data-*`. Em telas de toque (celular, sem mouse), "Clique" vira
+"Toque" nos padrões; o que você escrever no `data-*` vale nos dois casos.
+
+| Atributo | Padrão | No celular |
+|---|---|---|
+| `data-unmute-title` | Seu vídeo já começou | |
+| `data-unmute-subtitle` | Clique para ouvir | Toque para ouvir |
+| `data-play-text` | Clique para assistir | Toque para assistir |
+| `data-pause-text` | Continuar assistindo | Toque para continuar |
+| `data-replay-text` | Assistir de novo | |
+| `data-resume-title` | Continuar de onde parou? | |
+| `data-resume-subtitle` | Você parou em {time} | |
+| `data-resume-continue` | Continuar | |
+| `data-resume-restart` | Ver do início | |
+| `data-error-text` | O vídeo não carregou | |
+| `data-retry-text` | Tentar de novo | |
+
+Em `data-resume-subtitle`, `{time}` vira o tempo em que a pessoa parou (`7:32` ou `1:07:32`).
 
 ### Aparência
 
@@ -149,8 +178,39 @@ Além de `data-color`, o CSS usa variáveis que você pode sobrescrever:
 - Com mais de um player na página, indique a quem o elemento pertence: `data-vsl-player="vsl-principal"`.
   Sem isso, os elementos seguem o primeiro player da página.
 - Os elementos ficam escondidos pelo CSS (`display: none`) até o player liberar. Se o JavaScript não
-  carregar, ficam escondidos. Se preferir um botão sempre visível como garantia, coloque-o fora do delay.
+  carregar, ficam escondidos: por isso o bloco de instalação traz a linha de garantia (*fail-open*) que os
+  mostra depois de 10 s sem o player. Se o vídeo falhar (estado `error`), o player também libera todos.
 - O tempo conta mesmo com o vídeo mudo (autoplay), igual ao VTurb.
+
+### Pelo seletor, sem mexer no botão (`data-show`)
+
+Em construtores onde o botão de compra é um bloco pronto e não dá para acrescentar atributos nele (Atomicat,
+por exemplo), aponte o seletor no próprio player:
+
+```html
+<div class="vsl-player" data-src="..." data-pitch="12:30" data-show="#botao-oferta, .selo-garantia"></div>
+```
+
+Os elementos casados viram `data-vsl-show-at` com o tempo de `data-show-at` (ou do pitch, se omitido) e
+seguem as mesmas regras: escondidos até o tempo, visíveis ao recarregar, liberados em caso de erro.
+
+## Miniatura de pausa e tela final com botão
+
+Depois do pitch, quem pausa já viu a oferta: a pausa pode virar uma imagem com o botão de compra. E no fim
+do vídeo, em vez do "assistir de novo", uma imagem com o botão:
+
+```html
+<div class="vsl-player" data-src="..." data-pitch="12:30"
+     data-pause-poster-late="https://seu-cdn.com/pausa.jpg"
+     data-pause-cta-text="QUERO GARANTIR MINHA VAGA" data-pause-cta-link="https://pay.exemplo.com/..." data-pause-cta-pos="bottom-center"
+     data-end-poster="https://seu-cdn.com/fim.jpg"
+     data-end-cta-text="GARANTIR AGORA" data-end-cta-link="https://pay.exemplo.com/..." data-end-cta-pos="center"></div>
+```
+
+- A miniatura de pausa só aparece com `currentTime >= pitch`; antes do pitch a pausa é a de sempre.
+- O clique no botão segue o link (`target="_top"`) sem pausar nem reiniciar, dispara `cta_click`
+  `{ where: 'pause' | 'end', link }` e manda o evento para o analytics na hora.
+- Tocar fora do botão continua retomando (na pausa) ou reiniciando (no fim).
 
 ## Eventos
 
@@ -160,22 +220,27 @@ Cada player também dispara um evento DOM `vsl:<nome>` no próprio `div` (com `b
 | Evento | Quando | Dados |
 |---|---|---|
 | `ready` | metadados carregados | `duration` |
-| `autoplay` | começou mudo | |
-| `autoplay_blocked` | o aparelho não deixou começar; capa com play | |
+| `autoplay` | começou mudo (com imagem na tela) | |
+| `autoplay_blocked` | o aparelho não deixou começar, ou 12 s sem imagem; capa com play | `reason` (`no-frame` no segundo caso) |
 | `unmute` | primeira vez com som na visita (o "play" de verdade) | `time` |
 | `play` | começou ou retomou com som | `resumed` |
 | `pause` | pausou | |
 | `progress` | várias vezes por segundo | `time`, `duration`, `percent` |
 | `milestone` | passou de 10, 25, 50, 75, 90 e 100 % | `percent` |
-| `pitch` | chegou em `data-pitch` (uma vez por visitante) | `at` |
+| `pitch` | chegou em `data-pitch` com som e aba visível (uma vez por visitante) | `at`, `time`, `muted: false` |
 | `reach` | mostrou ou escondeu um elemento com delay | `at`, `action`, `element`, `persisted` |
 | `resume_prompt` | perguntou se quer continuar | `time` |
 | `resume_continue` / `resume_restart` | resposta à pergunta | `time` |
+| `cta_click` | clique no botão da miniatura de pausa ou da tela final | `where` (`pause` ou `end`), `link` |
 | `ended` | terminou | |
 | `replay` | assistiu de novo | |
 | `seek_blocked` | alguém tentou pular | `attempted`, `time` |
 | `fullscreen` | entrou ou saiu da tela cheia | `active` |
-| `error` | o vídeo não carregou | `code` |
+| `error` | o vídeo não carregou, mesmo depois das três retentativas | `code`, `attempt` |
+
+Se o tempo do pitch passar com o vídeo mudo, o `pitch` **não** é marcado como feito: ele dispara na primeira
+vez que a pessoa estiver com som e com a aba visível a partir desse tempo. `reach`, `milestone` e os elementos
+com delay continuam contando por tempo, mudo ou não.
 
 Exemplos com pixels:
 
@@ -184,6 +249,7 @@ Exemplos com pixels:
   // Meta Pixel
   VSLPlayer.on('unmute', () => fbq('trackCustom', 'VSL_Play'));
   VSLPlayer.on('pitch',  () => fbq('trackCustom', 'VSL_Pitch'));
+  VSLPlayer.on('cta_click', () => fbq('trackCustom', 'VSL_Clique'));
   VSLPlayer.on('ended',  () => fbq('trackCustom', 'VSL_Fim'));
 
   // GA4
@@ -197,12 +263,11 @@ Exemplos com pixels:
 ## Retenção e analytics
 
 Informe `data-analytics="https://seu-servidor.com/vsl"` e o player envia um `POST` (via `sendBeacon`, com
-`fetch` como reserva) a cada 15 segundos, ao sair da página e em eventos importantes. O corpo é JSON, enviado
-como `text/plain` para não exigir preflight de CORS:
+`fetch` como reserva). O corpo é JSON, enviado como `text/plain` para não exigir preflight de CORS:
 
 ```json
 {
-  "v": "1.0.0",
+  "v": "1.1.0",
   "player": "vsl-principal",
   "visitor": "6f1c...-...",          
   "session": "0b7e...-...",          
@@ -212,18 +277,29 @@ como `text/plain` para não exigir preflight de CORS:
   "maxTime": 772.3,
   "reached": 772.3,
   "unmuted": true,
+  "muted": false,
   "pitch": 750,
   "watched": [[0, 120], [300, 772]],
   "events": [
     { "type": "unmute", "ts": 1760000000000, "time": 0, "seq": 0 },
     { "type": "milestone", "ts": 1760000183000, "time": 183.1, "seq": 1, "percent": 10 },
-    { "type": "pitch", "ts": 1760000750000, "time": 750.0, "seq": 2, "at": 750 }
+    { "type": "pitch", "ts": 1760000750000, "time": 750.0, "seq": 2, "at": 750, "muted": false }
   ],
   "sentAt": 1760000800000
 }
 ```
 
+Quando os envios acontecem:
+
+- **Sessão muda** (a pessoa nunca ligou o som): um único envio logo que o vídeo carrega, e depois só ao sair
+  da página ou trocar de aba. Marcos e `reached` vão acumulando e saem juntos no `unmute` ou na saída.
+- **Com som:** a cada `data-analytics-interval` segundos (15 por padrão); depois de 5 minutos com som, a cada
+  60 s. `unmute`, `pitch`, `cta_click`, `ended` e `error` saem na hora.
+
+Campos:
+
 - `visitor` fica no localStorage e repete entre visitas; `session` muda a cada carregamento de cada player.
+- `muted` diz se a sessão ainda está muda (nunca ligou o som); `unmuted` é o contrário.
 - Em cada evento, `ts` é o horário (ms), `time` o segundo do vídeo em que aconteceu e `seq` um contador que
   distingue eventos emitidos no mesmo milissegundo.
 - `watched` são as faixas de segundos assistidos **com som**, acumuladas na sessão: a cada envio vem a lista
@@ -231,7 +307,7 @@ como `text/plain` para não exigir preflight de CORS:
   chegou com som; `reached` é o maior tempo já alcançado por esse navegador entre visitas, contando o autoplay
   mudo (é o que libera os elementos com delay).
 - Com isso dá para montar a curva de retenção (quantos visitantes viram cada segundo), a taxa de play
-  (`unmute` ÷ sessões) e quantos chegaram ao pitch.
+  (`unmute` ÷ sessões), quantos chegaram ao pitch e quantos clicaram no botão.
 
 **Já vem um servidor pronto:** a pasta [`analytics/`](analytics/README.md) tem um servidor em Python (só
 biblioteca padrão + SQLite) que recebe esses envios e mostra o painel com curva de retenção, taxa de play,
@@ -257,6 +333,7 @@ player.play();            // toca (com som, se já tiver sido liberado)
 player.pause();
 player.unmute();          // mesmo que o clique em "clique para ouvir"
 player.restart();         // do início, com som
+player.retry();           // tenta carregar o vídeo de novo (o mesmo que o botão "Tentar de novo")
 player.seek('5:00');      // pula (só pelo seu código; o visitante não consegue)
 player.toggleFullscreen();
 player.refreshElements(); // reencontra os elementos com delay (páginas que montam o HTML depois)
@@ -279,8 +356,9 @@ O vídeo começa a baixar no instante em que a página abre (`preload="auto"` e 
 visitante olha, já está tocando. Além disso:
 
 - o player abre a conexão com a CDN do vídeo antes do primeiro byte (`preconnect`);
-- com HLS, começa pela qualidade mais leve para o primeiro quadro aparecer na hora e sobe de qualidade
-  conforme a conexão permite, sem baixar 1080p para um player pequeno no celular;
+- com HLS, começa pela qualidade mais leve para o primeiro quadro aparecer na hora e, assim que lê o
+  manifesto, escolhe o nível mais perto de 480p (o menor lado, para vídeo vertical), subindo conforme a
+  conexão permite, sem baixar 1080p para um player pequeno no celular;
 - para MP4, exporte com `faststart` (veja abaixo) para não precisar baixar o arquivo inteiro antes de começar.
 
 Para ganhar mais alguns décimos de segundo, coloque o bloco do player no começo da página e, se o vídeo
@@ -288,14 +366,21 @@ estiver em outro domínio, adicione antes dele: `<link rel="preconnect" href="ht
 
 ## HLS (`.m3u8`)
 
-O Safari toca HLS sozinho. Para os outros navegadores inclua o [hls.js](https://github.com/video-dev/hls.js)
-antes do player; ele é usado automaticamente:
+O Safari toca HLS sozinho. Nos outros navegadores o player baixa o [hls.js](https://github.com/video-dev/hls.js)
+por conta própria (uma vez por página, compartilhado entre os players) quando encontra um `.m3u8`:
 
 ```html
-<script src="https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js"></script>
 <div class="vsl-player" data-src="https://seu-cdn.com/vsl/playlist.m3u8" data-fallback="https://seu-cdn.com/vsl.mp4"></div>
 <script src="vsl-player.js"></script>
 ```
+
+- `data-hls-url` troca o endereço de onde o hls.js é baixado (padrão: jsDelivr, `hls.js@1.5.20`, versão light).
+- Se o hls.js não chegar em 8 s, o player usa o `data-fallback` (MP4). Sem fallback, entra no caminho de erro
+  com retentativas (`code: 'hls-load'`).
+- Se quiser, carregue o hls.js antes do player (`<script src="https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js"></script>`);
+  ele é usado e nada é baixado de novo.
+- Em erro fatal do HLS o player se recupera sozinho: `startLoad()` para erro de rede, `recoverMediaError()`
+  para erro de mídia e, como último recurso, recria a instância.
 
 ## Onde hospedar o vídeo
 
@@ -313,6 +398,11 @@ Exporte o MP4 com `faststart` (os metadados no início do arquivo) para o vídeo
 bloqueia até o autoplay mudo. O player percebe e mostra a capa com o botão de play; o primeiro toque já toca
 com som.
 
+**Apareceu "O vídeo não carregou".** O player já tentou três vezes (1 s, 3 s e 8 s depois da falha) antes de
+mostrar isso; o visitante pode tocar em "Tentar de novo" (ou em qualquer ponto do player). Confira o endereço
+em `data-src` e se a CDN responde a *range requests*. Enquanto o erro estiver na tela, os elementos com delay
+ficam visíveis, para o botão de compra não sumir junto.
+
 **O botão de compra apareceu antes da hora.** O player lembra o maior tempo que aquele navegador já alcançou.
 Para testar de novo, clique em *Esquecer este visitante* na demonstração ou rode `VSLPlayer.get('id').forget()`
 no console.
@@ -326,13 +416,16 @@ alcançado (`vsl:<id>:reached`), se já viu o pitch (`vsl:<id>:pitch`) e, com an
 do visitante (`vsl:visitor`). Nada é enviado a lugar nenhum sem `data-analytics`.
 
 **Quero dois players na mesma página.** Dê um `data-id` diferente para cada um e use `data-vsl-player` nos
-elementos com delay.
+elementos com delay (ou `data-show` em cada player).
 
 ## Testes
 
 A pasta `testes/` tem um teste automatizado que abre o player em um Chromium de verdade (Playwright) e
-confere autoplay, clique para ouvir, pausa, delay de elementos, retomada, fim do vídeo, travas de
-velocidade e de pulo, autoplay bloqueado, analytics e celular. Precisa de Node 18+, ffmpeg e Playwright:
+confere autoplay, clique para ouvir, pausa, delay de elementos (`data-vsl-show-at` e `data-show`), retomada,
+fim do vídeo, travas de velocidade e de pulo, `data-speed`, autoplay bloqueado, vídeo 404 com retentativas e
+botão "Tentar de novo", carregamento lento e watchdog, pitch com som e aba visível, analytics (sessão muda e
+com som), toques no celular, miniatura de pausa, tela final com botão e HLS (com um `window.Hls` falso, já
+que o teste roda sem internet). Precisa de Node 18+, ffmpeg e Playwright:
 
 ```bash
 cd player/testes

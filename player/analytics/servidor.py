@@ -40,6 +40,10 @@ MAX_SEGUNDOS = 24 * 3600    # teto para duração, tempos e faixas (24 horas de 
 MAX_TS = 2 ** 53            # teto para carimbos de hora em milissegundos
 MAX_DIAS = 400              # dias na série diária
 PONTOS_CURVA = 1200         # pontos máximos na curva de retenção
+AMOSTRA_CURVA = 2000        # acima disso plays com som, a curva de retenção sai de uma amostra aleatória
+PLAYS_POUCOS = 30           # abaixo disso o painel avisa que os números ainda são ruído
+MAX_NAVEGADOR = 40          # tamanho máximo do filtro navegador=
+NAVEGADOR_DESCONHECIDO = "Desconhecido"   # como as sessões sem navegador ('' , anteriores à coluna) aparecem
 CAMINHOS_COLETA = {"/vsl", "/vsl/", "/coletar", "/coletar/", "/"}
 PERIODOS = {"hoje": 0, "7": 6, "30": 29, "90": 89}   # nome -> dias para trás, contando o de hoje
 
@@ -71,6 +75,7 @@ CREATE TABLE IF NOT EXISTS sessoes (
     utm_content  TEXT NOT NULL DEFAULT '',
     utm_term     TEXT NOT NULL DEFAULT '',
     dispositivo  TEXT NOT NULL DEFAULT 'computador',
+    navegador    TEXT NOT NULL DEFAULT '',
     user_agent   TEXT NOT NULL DEFAULT '',
     inicio       TEXT NOT NULL,
     ultimo       TEXT NOT NULL,
@@ -104,6 +109,12 @@ CREATE TABLE IF NOT EXISTS players (
     ultimo   TEXT NOT NULL
 );
 """
+# Colunas acrescentadas depois do primeiro esquema (bancos antigos ganham cada uma ao abrir; de novo, não faz nada).
+# A mesma coluna entra no Worker pela migração 0003_navegador.sql.
+COLUNAS_NOVAS = [("sessoes", "navegador", "TEXT NOT NULL DEFAULT ''")]
+# Colunas que o resumo lê (sem `assistido`: a curva de retenção lê essa coluna numa consulta própria, só dos plays).
+COLUNAS_RESUMO = ("sessao, player, visitante, inicio, origem, dispositivo, navegador, utm_content, utm_campaign, com_som, "
+                  "terminou, max_tempo, duracao, segundos")
 
 
 # ----------------------------------------------------------------------------- cálculos
@@ -197,6 +208,31 @@ def compactar_curva(curva: list[int], maximo: int = PONTOS_CURVA) -> tuple[int, 
 
 def dispositivo(user_agent: str) -> str:
     return "celular" if re.search(r"Mobi|Android|iPhone|iPad|iPod", user_agent or "", re.I) else "computador"
+
+
+# Navegador pelo User-Agent. A ordem importa: os apps (Instagram, Facebook, TikTok) e as WebViews do Android trazem
+# "Chrome" e "Safari" no UA, Samsung e Edge também. O que sobra com "Chrome" é o Chrome; só "Safari" é o Safari.
+# Mesma lista e mesma ordem do Worker (cloudflare/src/app.js: NAVEGADORES).
+NAVEGADORES = [
+    (re.compile(r"Instagram", re.I), "Instagram"),
+    (re.compile(r"FBAN/|FBAV/|FB_IAB/|FBIOS"), "Facebook"),
+    (re.compile(r"TikTok|musical_ly|BytedanceWebview|trill_", re.I), "TikTok"),
+    (re.compile(r"Android.*(; wv\)|Version/\d[\d.]* +Chrome/)"), "Chrome WebView"),
+    (re.compile(r"SamsungBrowser/"), "Samsung"),
+    (re.compile(r"Edg(e|A|iOS)?/"), "Edge"),
+    (re.compile(r"Firefox/|FxiOS/"), "Firefox"),
+    (re.compile(r"Chrome/|CriOS/"), "Chrome"),
+    (re.compile(r"Safari/"), "Safari"),
+]
+
+
+def navegador(user_agent: str) -> str:
+    """'Instagram' | 'Facebook' | 'TikTok' | 'Chrome WebView' | 'Samsung' | 'Edge' | 'Firefox' | 'Chrome' | 'Safari' | 'Outro'."""
+    ua = user_agent if isinstance(user_agent, str) else ""
+    for padrao, nome in NAVEGADORES:
+        if padrao.search(ua):
+            return nome
+    return "Outro"
 
 
 def utms(url: str) -> dict[str, str]:
@@ -322,6 +358,15 @@ class Banco:
             if str(caminho) != ":memory:":
                 self.con.execute("PRAGMA journal_mode=WAL")
             self.con.executescript(SCHEMA)
+            self._migrar()
+
+    def _migrar(self) -> None:
+        """Acrescenta as colunas novas a bancos criados antes delas. Confere pelo PRAGMA: ALTER repetido daria erro."""
+        for tabela, coluna, tipo in COLUNAS_NOVAS:
+            existentes = {linha["name"] for linha in self.con.execute(f"PRAGMA table_info({tabela})")}
+            if coluna not in existentes:
+                self.con.execute(f"ALTER TABLE {tabela} ADD COLUMN {coluna} {tipo}")
+                self.con.commit()
 
     def fechar(self) -> None:
         with self.lock:
@@ -357,13 +402,13 @@ class Banco:
                 marcas = utms(envio["url"])
                 self.con.execute(
                     "INSERT INTO sessoes (sessao, player, visitante, url, referrer, origem, utm_source, utm_medium, "
-                    "utm_campaign, utm_content, utm_term, dispositivo, user_agent, inicio, ultimo, duracao, max_tempo, "
-                    "com_som, terminou, assistido, segundos) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    "utm_campaign, utm_content, utm_term, dispositivo, navegador, user_agent, inicio, ultimo, duracao, "
+                    "max_tempo, com_som, terminou, assistido, segundos) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (envio["sessao"], envio["player"], envio["visitante"], envio["url"], envio["referrer"],
                      origem(marcas["utm_source"], envio["referrer"]), marcas["utm_source"], marcas["utm_medium"],
                      marcas["utm_campaign"], marcas["utm_content"], marcas["utm_term"], dispositivo(user_agent),
-                     _texto(user_agent, 500), momento, momento, duracao, max_tempo, envio["com_som"], terminou,
-                     json.dumps(faixas), self._segundos(faixas, duracao)),
+                     navegador(user_agent), _texto(user_agent, 500), momento, momento, duracao, max_tempo,
+                     envio["com_som"], terminou, json.dumps(faixas), self._segundos(faixas, duracao)),
                 )
             self.con.executemany(
                 "INSERT OR IGNORE INTO eventos (sessao, player, tipo, ts, tempo, dados, recebido) VALUES (?,?,?,?,?,?,?)",
@@ -395,7 +440,9 @@ class Banco:
         return [dict(linha) for linha in linhas]
 
     @staticmethod
-    def _filtro(player: str | None, de: str | None, ate: str | None, tabela: str = "") -> tuple[str, list]:
+    def _filtro(player: str | None, de: str | None, ate: str | None, tabela: str = "",
+                navegador: str | None = None) -> tuple[str, list]:
+        """Tudo por parâmetro ligado (?): player e navegador vêm da URL do painel, nunca entram no texto do SQL."""
         condicoes, params = [], []
         if player:
             condicoes.append(f"{tabela}player = ?")
@@ -406,32 +453,57 @@ class Banco:
         if ate:
             condicoes.append(f"substr({tabela}inicio, 1, 10) <= ?")
             params.append(ate)
+        if navegador:
+            # "Desconhecido" é como o painel mostra as sessões sem navegador (gravadas antes da coluna existir)
+            condicoes.append(f"{tabela}navegador = ?")
+            params.append("" if navegador == NAVEGADOR_DESCONHECIDO else navegador)
         return (" WHERE " + " AND ".join(condicoes)) if condicoes else "", params
 
-    def sessoes(self, player: str | None = None, de: str | None = None, ate: str | None = None) -> list[dict]:
-        where, params = self._filtro(player, de, ate)
+    def sessoes(self, player: str | None = None, de: str | None = None, ate: str | None = None,
+                navegador: str | None = None) -> list[dict]:
+        where, params = self._filtro(player, de, ate, navegador=navegador)
         with self.lock:
             linhas = self.con.execute("SELECT * FROM sessoes" + where + " ORDER BY inicio", params).fetchall()
         return [dict(linha) for linha in linhas]
 
     def resumo(self, player: str | None = None, de: str | None = None, ate: str | None = None,
-               pitch: float | None = None, periodo: str | None = None) -> dict:
+               pitch: float | None = None, periodo: str | None = None, navegador: str | None = None) -> dict:
         """Métricas do painel para um player e um período (datas AAAA-MM-DD inclusivas, ou um `periodo` nomeado)."""
         hoje = date.today()
         if periodo:
             de, ate = periodo_para_datas(periodo, hoje)
-        where, params = self._filtro(player, de, ate)
+        where, params = self._filtro(player, de, ate, navegador=navegador)
         with self.lock:
-            sessoes = [dict(l) for l in self.con.execute("SELECT * FROM sessoes" + where, params).fetchall()]
-            where_s, _ = self._filtro(player, de, ate, "s.")
+            sessoes = [dict(l) for l in self.con.execute("SELECT " + COLUNAS_RESUMO + " FROM sessoes" + where,
+                                                         params).fetchall()]
+            where_s, _ = self._filtro(player, de, ate, "s.", navegador)
             eventos = self.con.execute(
                 "SELECT e.tipo, COUNT(*) AS total, COUNT(DISTINCT e.sessao) AS sessoes FROM eventos e "
                 "JOIN sessoes s ON s.sessao = e.sessao" + where_s + " GROUP BY e.tipo ORDER BY total DESC", params
+            ).fetchall()
+            # sessões com clique no botão (cta_click) e com erro do vídeo (error)
+            marcados = self.con.execute(
+                "SELECT DISTINCT e.sessao, e.tipo FROM eventos e JOIN sessoes s ON s.sessao = e.sessao" + where_s
+                + (" AND " if where_s else " WHERE ") + "e.tipo IN ('cta_click', 'error')", params
             ).fetchall()
             config = self.con.execute(
                 "SELECT player, pitch, duracao FROM players" + (" WHERE player = ?" if player else ""),
                 [player] if player else [],
             ).fetchall()
+            # Curva de retenção: lê só `assistido`, e só dos plays. Acima de AMOSTRA_CURVA plays, usa uma amostra
+            # aleatória (mesmo paliativo de CPU do Worker); os números dos tiles continuam exatos.
+            n_plays = sum(1 for s in sessoes if s["com_som"])
+            curva_amostrada = n_plays > AMOSTRA_CURVA
+            listas = []
+            if n_plays:
+                sql_curva = ("SELECT assistido FROM sessoes" + where + (" AND" if where else " WHERE") + " com_som = 1"
+                             + (f" ORDER BY RANDOM() LIMIT {AMOSTRA_CURVA}" if curva_amostrada else ""))
+                listas = [json.loads(l["assistido"]) for l in self.con.execute(sql_curva, params).fetchall()]
+        clicaram = {m["sessao"] for m in marcados if m["tipo"] == "cta_click"}
+        erraram = {m["sessao"] for m in marcados if m["tipo"] == "error"}
+        for s in sessoes:
+            s["clicou"] = 1 if s["sessao"] in clicaram else 0
+            s["errou"] = 1 if s["sessao"] in erraram else 0
 
         # Cada sessão é julgada pelo pitch do seu próprio player (ou pelo ?pitch= passado, que vale para todos).
         pitches = {c["player"]: c["pitch"] for c in config}
@@ -460,7 +532,10 @@ class Banco:
         tempos = [s["segundos"] for s in plays]
         engajamentos = [min(1.0, s["segundos"] / s["duracao"]) for s in plays if s["duracao"] > 0]
 
-        passo, pontos = compactar_curva(curva_retencao([json.loads(s["assistido"]) for s in plays], duracao))
+        cliques = sum(s["clicou"] for s in sessoes)
+        erros = sum(s["errou"] for s in sessoes)
+
+        passo, pontos = compactar_curva(curva_retencao(listas, duracao))
 
         por_dia: dict[str, dict] = {}
         for s in sessoes:
@@ -476,25 +551,33 @@ class Banco:
                     por_dia.setdefault(d.isoformat(), {"dia": d.isoformat(), "sessoes": 0, "plays": 0})
                     d += timedelta(days=1)
 
-        def agrupar(chave: str, limite: int | None = None) -> list[dict]:
+        # Tabelas por origem, dispositivo, navegador, criativo e campanha: {nome, sessoes, plays, pitch, terminaram, cliques}.
+        # `vazio` é o nome mostrado quando a coluna está em branco; acima de `limite` grupos, o resto vira "outras".
+        chaves_grupo = ("sessoes", "plays", "pitch", "terminaram", "cliques")
+
+        def agrupar(chave: str, limite: int | None = None, vazio: str = "") -> list[dict]:
             grupos: dict[str, dict] = {}
             for s in sessoes:
-                g = grupos.setdefault(s[chave], {"nome": s[chave], "sessoes": 0, "plays": 0, "pitch": 0, "terminaram": 0})
+                nome = s[chave] or vazio
+                g = grupos.setdefault(nome, {"nome": nome, "sessoes": 0, "plays": 0, "pitch": 0, "terminaram": 0,
+                                             "cliques": 0})
                 g["sessoes"] += 1
                 g["plays"] += s["com_som"]
                 g["pitch"] += 1 if chegou(s) else 0
                 g["terminaram"] += 1 if (s["com_som"] and s["terminou"]) else 0
+                g["cliques"] += s["clicou"]
             lista = sorted(grupos.values(), key=lambda g: (-g["sessoes"], g["nome"]))
             if limite and len(lista) > limite:
-                resto = {"nome": "outras", "sessoes": 0, "plays": 0, "pitch": 0, "terminaram": 0}
+                resto = {"nome": "outras", "sessoes": 0, "plays": 0, "pitch": 0, "terminaram": 0, "cliques": 0}
                 for g in lista[limite:]:
-                    for k in ("sessoes", "plays", "pitch", "terminaram"):
+                    for k in chaves_grupo:
                         resto[k] += g[k]
                 lista = lista[:limite] + [resto]
             return lista
 
         return {
             "player": player,
+            "navegador": navegador,
             "periodo": periodo or ("custom" if (de or ate) else "tudo"),
             "de": de,
             "ate": ate,
@@ -510,27 +593,39 @@ class Banco:
             "taxa_pitch": round(len(chegaram_pitch) / len(plays), 4) if plays else 0,
             "terminaram": len(terminaram),
             "taxa_conclusao": round(len(terminaram) / len(plays), 4) if plays else 0,
+            "cliques": cliques,
+            "taxa_clique": round(cliques / len(chegaram_pitch), 4) if chegaram_pitch else 0,
+            "erros": erros,
+            "taxa_erro": round(erros / len(sessoes), 4) if sessoes else 0,
+            "funil": {"visitas": len(sessoes), "plays": len(plays), "pitch": len(chegaram_pitch), "cliques": cliques},
+            "amostra": {"plays": len(plays), "pequena": len(plays) < PLAYS_POUCOS},
             "tempo_medio": round(statistics.fmean(tempos), 1) if tempos else 0,
             "tempo_mediano": round(statistics.median(tempos), 1) if tempos else 0,
             "engajamento": round(statistics.fmean(engajamentos), 4) if engajamentos else 0,
             "retencao": {"passo": passo, "pontos": pontos},
+            "curva_amostrada": curva_amostrada,
+            "curva_n": len(listas),
             "por_dia": sorted(por_dia.values(), key=lambda d: d["dia"]),
-            "origens": agrupar("origem", 12),
+            "origens": agrupar("origem", 12, "direto"),
             "dispositivos": agrupar("dispositivo"),
+            "navegadores": agrupar("navegador", None, NAVEGADOR_DESCONHECIDO),
+            "criativos": agrupar("utm_content", 12, "(sem utm_content)"),
+            "campanhas": agrupar("utm_campaign", 12, "(sem utm_campaign)"),
             "eventos": [dict(e) for e in eventos],
         }
 
     def csv(self, player: str | None = None, de: str | None = None, ate: str | None = None,
-            periodo: str | None = None) -> str:
+            periodo: str | None = None, navegador: str | None = None) -> str:
         if periodo:
             de, ate = periodo_para_datas(periodo)
+        # As mesmas 20 colunas do Worker (que acrescenta `dia` no fim).
         colunas = ["sessao", "player", "visitante", "inicio", "ultimo", "origem", "utm_source", "utm_medium",
                    "utm_campaign", "utm_content", "utm_term", "dispositivo", "url", "referrer", "duracao",
-                   "max_tempo", "segundos", "com_som", "terminou"]
+                   "max_tempo", "segundos", "com_som", "terminou", "navegador"]
         saida = io.StringIO()
         escritor = csv.writer(saida, delimiter=";", lineterminator="\n")
         escritor.writerow(colunas)
-        for s in self.sessoes(player, de, ate):
+        for s in self.sessoes(player, de, ate, navegador):
             escritor.writerow([_celula(s[c]) for c in colunas])
         return saida.getvalue()
 
@@ -688,15 +783,21 @@ class Handler(BaseHTTPRequestHandler):
         if periodo and periodo != "tudo" and periodo not in PERIODOS:
             self._json(400, {"erro": "periodo precisa ser hoje, 7, 30, 90 ou tudo"})
             return
+        # navegador=: texto de até MAX_NAVEGADOR caracteres (ex.: Instagram, Chrome WebView, Desconhecido); só entra ligado (?)
+        navegador_pedido = valor("navegador")
+        navegador = _texto(navegador_pedido, MAX_NAVEGADOR) or None
+        if navegador_pedido and (len(navegador_pedido) > MAX_NAVEGADOR or not navegador):
+            self._json(400, {"erro": f"navegador precisa ser um texto de ate {MAX_NAVEGADOR} caracteres"})
+            return
         if caminho == "/api/resumo":
             pitch = _pitch(valor("pitch")) if valor("pitch") else None
             if valor("pitch") and pitch is None:
                 self._json(400, {"erro": "pitch precisa ser um numero de segundos"})
                 return
-            self._json(200, self.banco.resumo(player, de, ate, pitch, periodo))
+            self._json(200, self.banco.resumo(player, de, ate, pitch, periodo, navegador))
             return
         seguro = re.sub(r"[^A-Za-z0-9._-]+", "_", player or "todos").strip("_")[:60] or "todos"
-        corpo = ("﻿" + self.banco.csv(player, de, ate, periodo)).encode("utf-8")
+        corpo = ("﻿" + self.banco.csv(player, de, ate, periodo, navegador)).encode("utf-8")
         self._responder(200, corpo, "text/csv; charset=utf-8",
                         extras={"Content-Disposition": f'attachment; filename="sessoes-{seguro}.csv"'})
 

@@ -7,6 +7,7 @@ import http.client
 import json
 import logging
 import socket
+import sqlite3
 import sys
 import threading
 from datetime import date, datetime, timedelta
@@ -29,6 +30,31 @@ def envio(sessao="s1", **extra):
     }
     base.update(extra)
     return base
+
+
+# User-Agents reais (abreviados), um por classe de navegador. Os mesmos estão em cloudflare/teste/worker.test.js.
+UA = {
+    "instagram_ios": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Instagram 334.0.4.32.98 (iPhone15,2; iOS 17_5; pt_BR; pt; scale=3.00; 1179x2556; 601595932)",
+    "instagram_android": "Mozilla/5.0 (Linux; Android 14; SM-S918B Build/UP1A.231005.007; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/124.0.6367.179 Mobile Safari/537.36 Instagram 334.0.0.42.95 Android (34/14; 450dpi; 1080x2340; samsung; SM-S918B; dm3q; qcom; pt_BR; 597335394)",
+    "facebook_android": "Mozilla/5.0 (Linux; Android 14; SM-A546E Build/UP1A.231005.007; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/124.0.6367.179 Mobile Safari/537.36 [FB_IAB/FB4A;FBAV/467.0.0.47.108;]",
+    "facebook_ios": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 [FBAN/FBIOS;FBAV/467.0.0.37.108;FBBV/605519286;FBDV/iPhone15,2;FBMD/iPhone;FBSN/iOS;FBSV/17.5;FBSS/3;FBID/phone;FBLC/pt_BR;FBOP/5]",
+    "tiktok_ios": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 musical_ly_34.5.0 JsSdk/2.0 NetType/WIFI Channel/App Store ByteLocale/pt-BR Region/BR WKWebView/1 BytedanceWebview/d8a21c6",
+    "tiktok_android": "Mozilla/5.0 (Linux; Android 13; Pixel 7 Build/TQ3A.230805.001; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/124.0.6367.179 Mobile Safari/537.36 trill_2022803 JsSdk/1.0 NetType/WIFI Channel/googleplay AppName/musical_ly app_version/34.5.3 BytedanceWebview/d8a21c6",
+    "webview_wv": "Mozilla/5.0 (Linux; Android 13; Pixel 7 Build/TQ3A.230805.001; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/124.0.6367.179 Mobile Safari/537.36",
+    "webview_version": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/124.0.0.0 Mobile Safari/537.36",
+    "samsung": "Mozilla/5.0 (Linux; Android 14; SAMSUNG SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) SamsungBrowser/25.0 Chrome/121.0.0.0 Mobile Safari/537.36",
+    "edge": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 Edg/124.0.0.0",
+    "edge_android": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36 EdgA/124.0.0.0",
+    "firefox": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:126.0) Gecko/20100101 Firefox/126.0",
+    "firefox_ios": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) FxiOS/126.0 Mobile/15E148 Safari/605.1.15",
+    "chrome": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "chrome_android": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36",
+    "chrome_ios": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/124.0.6367.88 Mobile/15E148 Safari/604.1",
+    "safari_ios": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1",
+    "safari_mac": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15",
+    "wkwebview": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148",
+    "curl": "curl/8.5.0",
+}
 
 
 # ---------------------------------------------------------------- cálculos
@@ -60,6 +86,20 @@ def test_origem_e_dispositivo():
     assert servidor.origem("TikTok", "https://www.google.com/") == "tiktok"
     assert servidor.dispositivo("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)") == "celular"
     assert servidor.dispositivo("Mozilla/5.0 (Windows NT 10.0; Win64; x64)") == "computador"
+
+
+def test_navegador_por_user_agent():
+    esperado = {
+        "instagram_ios": "Instagram", "instagram_android": "Instagram", "facebook_android": "Facebook",
+        "facebook_ios": "Facebook", "tiktok_ios": "TikTok", "tiktok_android": "TikTok",
+        "webview_wv": "Chrome WebView", "webview_version": "Chrome WebView", "samsung": "Samsung", "edge": "Edge",
+        "edge_android": "Edge", "firefox": "Firefox", "firefox_ios": "Firefox", "chrome": "Chrome",
+        "chrome_android": "Chrome", "chrome_ios": "Chrome", "safari_ios": "Safari", "safari_mac": "Safari",
+        "wkwebview": "Outro", "curl": "Outro",
+    }
+    for chave, nome in esperado.items():
+        assert servidor.navegador(UA[chave]) == nome, chave
+    assert servidor.navegador("") == "Outro" and servidor.navegador(None) == "Outro" and servidor.navegador(123) == "Outro"
 
 
 def test_validar_envio_rejeita_o_que_nao_serve():
@@ -153,6 +193,141 @@ def test_csv():
     linhas = banco.csv().splitlines()
     assert linhas[0].startswith("sessao;player;visitante;inicio")
     assert linhas[1].startswith("s1;vsl-principal;vis-1;")
+
+
+def test_navegador_gravado_na_sessao_e_no_csv():
+    banco = servidor.Banco()
+    banco.registrar(envio("a"), UA["instagram_ios"])
+    banco.registrar(envio("b"), UA["webview_wv"])
+    banco.registrar(envio("c"), "")
+    assert [s["navegador"] for s in banco.sessoes()] == ["Instagram", "Chrome WebView", "Outro"]
+    linhas = banco.csv().splitlines()
+    cabecalho = linhas[0].split(";")
+    assert len(cabecalho) == 20 and cabecalho[19] == "navegador"   # última no Python; o Worker põe `dia` depois dela
+    assert linhas[1].split(";")[19] == "Instagram" and ";Chrome WebView" in linhas[2]
+
+
+def test_banco_antigo_ganha_a_coluna_navegador_uma_vez_so(tmp_path):
+    caminho = tmp_path / "velho.sqlite"
+    con = sqlite3.connect(caminho)
+    con.executescript(servidor.SCHEMA.replace("    navegador    TEXT NOT NULL DEFAULT '',\n", ""))  # esquema de antes da coluna
+    con.execute("INSERT INTO sessoes (sessao, player, inicio, ultimo, duracao, max_tempo, com_som, assistido, segundos) "
+                "VALUES ('velha', 'vsl-principal', '2026-10-01T10:00:00', '2026-10-01T10:00:00', 120, 40, 1, '[[0,39]]', 40)")
+    con.commit()
+    assert "navegador" not in {l[1] for l in con.execute("PRAGMA table_info(sessoes)")}
+    con.close()
+    for _ in range(2):   # abrir duas vezes: a segunda não pode tentar o ALTER de novo
+        banco = servidor.Banco(caminho)
+        colunas = [l[1] for l in banco.con.execute("PRAGMA table_info(sessoes)")]
+        assert colunas.count("navegador") == 1
+        banco.fechar()
+    banco = servidor.Banco(caminho)
+    banco.registrar(envio("nova"), UA["instagram_ios"])
+    r = banco.resumo()
+    assert [(n["nome"], n["sessoes"]) for n in r["navegadores"]] == [("Desconhecido", 1), ("Instagram", 1)]
+    f = banco.resumo(navegador="Desconhecido")
+    assert f["sessoes"] == 1 and f["navegador"] == "Desconhecido" and f["navegadores"][0]["nome"] == "Desconhecido"
+    assert banco.csv(navegador="Desconhecido").splitlines()[1].startswith("velha;") and banco.csv(navegador="Desconhecido").count("\n") == 2
+    banco.fechar()
+
+
+def test_resumo_cliques_erros_funil_amostra_e_tabelas_novas():
+    banco = servidor.Banco()
+
+    def url(conteudo, campanha="lancamento"):
+        return f"https://site.com/vsl?utm_source=Facebook&utm_campaign={campanha}&utm_content={conteudo}"
+
+    # a: play, chegou ao pitch, clicou duas vezes (conta uma sessão)
+    banco.registrar(envio("a", url=url("video-1"), events=[{"type": "unmute", "ts": 1}, {"type": "cta_click", "ts": 2, "where": "end"},
+                                                            {"type": "cta_click", "ts": 3}]), UA["instagram_ios"])
+    # b: play, não chegou ao pitch, erro do vídeo
+    banco.registrar(envio("b", visitor="vis-2", url=url("video-1"), maxTime=10, watched=[[0, 9]],
+                          events=[{"type": "error", "ts": 1, "code": "hls-load"}]), UA["chrome"])
+    # c: mudo, clicou no botão da miniatura de pausa; sem utm
+    banco.registrar(envio("c", visitor="vis-3", url="https://site.com/vsl", referrer="", unmuted=False, maxTime=50,
+                          watched=[[0, 49]], events=[{"type": "cta_click", "ts": 1}]), UA["safari_ios"])
+    # d: mudo, outra campanha e outro criativo, UA vazio
+    banco.registrar(envio("d", visitor="vis-4", url=url("video-2", "remarketing"), unmuted=False, events=[]), "")
+    r = banco.resumo()
+    assert (r["sessoes"], r["plays"], r["chegaram_pitch"]) == (4, 2, 1)
+    assert r["cliques"] == 2 and r["taxa_clique"] == 2      # cliques ÷ chegaram ao pitch (2 ÷ 1)
+    assert r["erros"] == 1 and r["taxa_erro"] == 0.25
+    assert r["funil"] == {"visitas": 4, "plays": 2, "pitch": 1, "cliques": 2}
+    assert r["amostra"] == {"plays": 2, "pequena": True}
+    assert r["curva_amostrada"] is False and r["curva_n"] == 2 and r["navegador"] is None
+    nav = {g["nome"]: g for g in r["navegadores"]}
+    assert sorted(nav) == ["Chrome", "Instagram", "Outro", "Safari"]
+    assert nav["Instagram"] == {"nome": "Instagram", "sessoes": 1, "plays": 1, "pitch": 1, "terminaram": 0, "cliques": 1}
+    assert nav["Safari"] == {"nome": "Safari", "sessoes": 1, "plays": 0, "pitch": 0, "terminaram": 0, "cliques": 1}
+    assert nav["Chrome"] == {"nome": "Chrome", "sessoes": 1, "plays": 1, "pitch": 0, "terminaram": 0, "cliques": 0}
+    cri = {g["nome"]: g for g in r["criativos"]}
+    assert cri["video-1"] == {"nome": "video-1", "sessoes": 2, "plays": 2, "pitch": 1, "terminaram": 0, "cliques": 1}
+    assert cri["video-2"]["sessoes"] == 1 and cri["(sem utm_content)"]["sessoes"] == 1 and cri["(sem utm_content)"]["cliques"] == 1
+    cam = {g["nome"]: g for g in r["campanhas"]}
+    assert cam["lancamento"]["sessoes"] == 2 and cam["remarketing"]["sessoes"] == 1 and cam["(sem utm_campaign)"]["cliques"] == 1
+    ori = {g["nome"]: g for g in r["origens"]}
+    assert ori["facebook"]["cliques"] == 1 and ori["direto"]["cliques"] == 1
+    disp = {g["nome"]: g for g in r["dispositivos"]}
+    assert disp["celular"]["cliques"] == 2 and disp["computador"]["cliques"] == 0
+    # sem sessões: tudo zero, sem divisão por zero
+    vazio = banco.resumo("inexistente")
+    assert (vazio["cliques"], vazio["taxa_clique"], vazio["erros"], vazio["taxa_erro"], vazio["curva_n"]) == (0, 0, 0, 0, 0)
+    assert vazio["funil"] == {"visitas": 0, "plays": 0, "pitch": 0, "cliques": 0} and vazio["navegadores"] == []
+    # 30 plays deixam de ser amostra pequena
+    banco2 = servidor.Banco()
+    for i in range(servidor.PLAYS_POUCOS):
+        banco2.registrar(envio(f"s{i}"))
+    assert banco2.resumo()["amostra"]["pequena"] is False
+
+
+def test_criativos_e_campanhas_ate_12_mais_outras():
+    banco = servidor.Banco()
+    for i in range(15):
+        banco.registrar(envio(f"s{i}", url=f"https://site.com/?utm_content=c{i}&utm_campaign=k{i}",
+                              events=[{"type": "cta_click", "ts": 1}] if i < 2 else []))
+    r = banco.resumo()
+    assert len(r["criativos"]) == 13 and r["criativos"][-1]["nome"] == "outras" and r["criativos"][-1]["sessoes"] == 3
+    assert len(r["campanhas"]) == 13 and r["campanhas"][-1]["nome"] == "outras"
+    assert sum(g["cliques"] for g in r["criativos"]) == 2 and sum(g["sessoes"] for g in r["campanhas"]) == 15
+
+
+def test_filtro_navegador_no_resumo_e_no_csv():
+    banco = servidor.Banco()
+    banco.registrar(envio("a"), UA["instagram_ios"])
+    banco.registrar(envio("b", visitor="vis-2"), UA["chrome"])
+    banco.registrar(envio("c", visitor="vis-3"), UA["webview_wv"])
+    assert banco.resumo(navegador="Instagram")["sessoes"] == 1
+    assert banco.resumo(navegador="Chrome WebView")["sessoes"] == 1
+    assert banco.resumo(navegador="Chrome")["sessoes"] == 1          # exato: Chrome não pega Chrome WebView
+    assert banco.resumo(navegador="chrome")["sessoes"] == 0          # exato: diferencia maiúsculas
+    assert banco.resumo(navegador="x' OR '1'='1")["sessoes"] == 0    # o valor vai como parâmetro, não como SQL
+    assert banco.resumo(navegador="Desconhecido")["sessoes"] == 0
+    r = banco.resumo("vsl-principal", navegador="Instagram")
+    assert r["navegador"] == "Instagram" and [n["nome"] for n in r["navegadores"]] == ["Instagram"] and r["visitantes"] == 1
+    assert r["eventos"][0]["sessoes"] == 1                           # a tabela de eventos respeita o filtro
+    assert banco.csv(navegador="Chrome WebView").count("\n") == 2 and banco.csv().count("\n") == 4
+    assert banco.sessoes(navegador="Chrome")[0]["sessao"] == "b"
+
+
+def test_curva_amostrada_acima_de_2000_plays():
+    banco = servidor.Banco()
+    n = servidor.AMOSTRA_CURVA
+    linhas = [(f"s{i}", "vsl-principal", "2026-10-01T10:00:00", "2026-10-01T10:00:00", 60, 10, 1, "[[0,9]]", 10, "Chrome")
+              for i in range(n + 1)] + [("muda", "vsl-principal", "2026-10-01T10:00:00", "2026-10-01T10:00:00", 60, 10, 0, "[[0,9]]", 10, "Chrome")]
+    banco.con.executemany("INSERT INTO sessoes (sessao, player, inicio, ultimo, duracao, max_tempo, com_som, assistido, segundos, navegador) "
+                          "VALUES (?,?,?,?,?,?,?,?,?,?)", linhas)
+    banco.con.execute("INSERT INTO players (player, pitch, duracao, primeiro, ultimo) VALUES ('vsl-principal', 5, 60, '2026-10-01T10:00:00', '2026-10-01T10:00:00')")
+    banco.con.commit()
+    r = banco.resumo()
+    assert r["sessoes"] == n + 2 and r["plays"] == n + 1 and r["chegaram_pitch"] == n + 1 and r["tempo_medio"] == 10
+    assert r["curva_amostrada"] is True and r["curva_n"] == n
+    assert (r["retencao"]["pontos"][0], r["retencao"]["pontos"][9], r["retencao"]["pontos"][10]) == (n, n, 0)   # a sessão muda fica fora
+    assert r["amostra"] == {"plays": n + 1, "pequena": False}
+    banco.con.execute("DELETE FROM sessoes WHERE sessao = 's0'")
+    banco.con.commit()
+    r2 = banco.resumo()
+    assert r2["curva_amostrada"] is False and r2["curva_n"] == n and r2["retencao"]["pontos"][0] == n
+    assert banco.resumo("outro")["curva_n"] == 0 and banco.resumo(navegador="Safari")["curva_n"] == 0
 
 
 def test_csv_neutraliza_formulas():
@@ -316,6 +491,29 @@ def test_parametros_invalidos_dao_400(pedir):
     assert pedir("GET", "/api/resumo?periodo=x", None, cab)[0] == 400
     assert pedir("GET", "/api/resumo?periodo=7&pitch=12.5", None, cab)[0] == 200
     assert pedir("GET", "/api/sessoes.csv?de=2026-99-99", None, cab)[0] == 400
+
+
+def test_api_filtro_navegador_validado_e_aplicado(pedir):
+    cab = {"X-Token": "segredo"}
+    for sessao, ua in (("a", UA["instagram_ios"]), ("b", UA["webview_wv"])):
+        corpo = json.dumps(envio(sessao)).encode()
+        assert pedir("POST", "/vsl", corpo, {"Content-Length": str(len(corpo)), "User-Agent": ua})[0] == 204
+    status, _, dados = pedir("GET", "/api/resumo?navegador=Instagram", None, cab)
+    r = json.loads(dados)
+    assert status == 200 and r["sessoes"] == 1 and r["navegador"] == "Instagram" and r["navegadores"][0]["nome"] == "Instagram"
+    for campo in ("cliques", "taxa_clique", "erros", "taxa_erro", "funil", "amostra", "curva_amostrada", "curva_n",
+                  "navegadores", "criativos", "campanhas"):
+        assert campo in r, campo
+    status, _, csv = pedir("GET", "/api/sessoes.csv?navegador=Chrome%20WebView", None, cab)
+    linhas = csv.decode("utf-8-sig").splitlines()
+    assert status == 200 and len(linhas) == 2 and linhas[1].endswith(";Chrome WebView")
+    assert json.loads(pedir("GET", "/api/resumo", None, cab)[2])["navegador"] is None
+    assert pedir("GET", "/api/resumo?navegador=" + "a" * servidor.MAX_NAVEGADOR, None, cab)[0] == 200
+    assert pedir("GET", "/api/resumo?navegador=" + "a" * (servidor.MAX_NAVEGADOR + 1), None, cab)[0] == 400
+    assert pedir("GET", "/api/resumo?navegador=%20%20", None, cab)[0] == 400
+    assert pedir("GET", "/api/sessoes.csv?navegador=" + "a" * (servidor.MAX_NAVEGADOR + 1), None, cab)[0] == 400
+    status, _, dados = pedir("GET", "/api/resumo?navegador=x%27%20OR%201%3D1%20--", None, cab)
+    assert status == 200 and json.loads(dados)["sessoes"] == 0
 
 
 def test_nome_do_csv_e_seguro(pedir):

@@ -2,11 +2,14 @@
 import { DatabaseSync } from 'node:sqlite';
 import fs from 'node:fs';
 
-export function criarD1() {
-  const db = new DatabaseSync(':memory:');
-  for (const arq of ['0001_inicial.sql', '0002_players_e_indice.sql']) {
-    db.exec(fs.readFileSync(new URL('../migrations/' + arq, import.meta.url), 'utf8'));
-  }
+export const MIGRACOES = ['0001_inicial.sql', '0002_players_e_indice.sql', '0003_navegador.sql'];
+
+/** SQL de todas as migrações, na ordem, como o index.js entrega ao criarApp. */
+export const lerMigracoes = (nomes = MIGRACOES) => nomes.map((a) => fs.readFileSync(new URL('../migrations/' + a, import.meta.url), 'utf8')).join('\n');
+
+/** Envolve um node:sqlite com a API do D1. `migracoes` é a lista de arquivos a aplicar antes (vazia = banco cru). */
+export function envolver(db, migracoes = []) {
+  for (const arq of migracoes) db.exec(fs.readFileSync(new URL('../migrations/' + arq, import.meta.url), 'utf8'));
   return {
     prepare(sql) {
       const st = db.prepare(sql);
@@ -22,4 +25,8 @@ export function criarD1() {
     async batch(stmts) { return Promise.all(stmts.map((s) => s.run())); },
     async exec(sql) { db.exec(sql); },
   };
+}
+
+export function criarD1(migracoes = MIGRACOES) {
+  return envolver(new DatabaseSync(':memory:'), migracoes);
 }

@@ -85,12 +85,15 @@
      data-src="https://seu-cdn.com/vsl.mp4"
      data-poster="https://seu-cdn.com/capa.jpg"
      data-color="#e11d48"
-     data-pitch="12:30"&gt;&lt;/div&gt;
+     data-pitch="12:30"
+     data-show="#botao-comprar"&gt;&lt;/div&gt;
 
-&lt;!-- aparece quando o vídeo chega em 12:30 --&gt;
-&lt;a class="botao-comprar" data-vsl-show-at="12:30" href="..."&gt;COMPRAR AGORA&lt;/a&gt;
+&lt;!-- aparece quando o vídeo chega em 12:30 (pelo data-show acima ou por data-vsl-show-at="12:30" no próprio elemento) --&gt;
+&lt;a id="botao-comprar" href="..."&gt;COMPRAR AGORA&lt;/a&gt;
 
-&lt;script src="vsl-player.js"&gt;&lt;/script&gt;</code></pre>
+&lt;script src="vsl-player.js"&gt;&lt;/script&gt;
+&lt;!-- garantia: se o player não carregar em 10 s, os elementos com delay aparecem mesmo assim --&gt;
+&lt;script&gt;setTimeout(function(){if(!window.VSLPlayer)document.querySelectorAll('[data-vsl-show-at]').forEach(function(e){e.classList.add('vsl-visible')})},10000)&lt;/script&gt;</code></pre>
   </section>
 </main>
 
