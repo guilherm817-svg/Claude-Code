@@ -249,6 +249,16 @@ export class Legendas {
     if (ligadas) this.transcrever(null, false);
   }
 
+  // Estilo sugerido pelo Corretor de prompts: aplica nos ajustes e liga as legendas (é um passo do desfazer).
+  aplicarEstilo(estilo) {
+    const estavamLigadas = this.app.projeto().legendas_ativas;
+    this.app.editar((proj) => {
+      proj.estilo_legenda = { ...proj.estilo_legenda, ...estilo };
+      proj.legendas_ativas = true;
+    });
+    if (!estavamLigadas) this.transcrever(null, false);
+  }
+
   _andamento() {
     const t = this.trabalho;
     if (t?.estado === 'erro' && t.projeto_id === this.app.projeto().id) {

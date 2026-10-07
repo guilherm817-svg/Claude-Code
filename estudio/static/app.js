@@ -967,7 +967,15 @@ async function iniciar() {
   montarAcoesDaLinha();
   montarEventos();
   previa.definirMudo(lembrar('mudo', false));
-  iniciarCorretor({ aoTrocarDeAba: (aba) => { if (aba !== 'montagem') previa.pausar(); } });
+  iniciarCorretor({
+    aoTrocarDeAba: (aba) => { if (aba !== 'montagem') previa.pausar(); },
+    aplicarEstiloDeLegenda: (estilo) => {
+      legendas.aplicarEstilo(estilo);
+      mostrarAba('montagem');
+      selecionar(null);
+      avisar('Estilo aplicado nas legendas do projeto. Confira na prévia e ajuste no painel da direita.');
+    },
+  });
   try {
     estado.config = await api.config();
     const projetos = await api.listar();

@@ -235,6 +235,23 @@ async function esperarServidor() {
     conferir(await pagina.isVisible('.cartao-chave') && await pagina.isVisible('.chave-form button:has-text("Cancelar")'),
       'o erro de chave oferece trocar a chave');
 
+    console.log('Aplicar o estilo de legenda sugerido');
+    await pagina.click('.chave-form button:has-text("Cancelar")');
+    await pagina.fill('#corretor-prompt', `LEGENDA-ESTUDIO ${PROMPT_REAL} Big bold captions YELLOW word by word`);
+    await pagina.keyboard.press('Control+Enter');
+    await pagina.waitForSelector('#corretor-legenda button:has-text("Aplicar nas legendas do Estúdio")');
+    await pagina.click('#corretor-legenda button:has-text("Aplicar nas legendas do Estúdio")');
+    await pagina.waitForSelector('#linha', { state: 'visible' });
+    const projetoComLegenda = await pagina.evaluate(async () => {
+      const [primeiro] = await (await fetch('/api/projetos')).json();
+      await new Promise((r) => setTimeout(r, 1200)); // o salvamento automático espera 400 ms
+      return (await fetch(`/api/projetos/${primeiro.id}`)).json();
+    });
+    conferir(projetoComLegenda.legendas_ativas && projetoComLegenda.estilo_legenda.preset === 'uma_palavra'
+      && projetoComLegenda.estilo_legenda.tamanho === 'G' && projetoComLegenda.estilo_legenda.posicao === 'baixo',
+    'Aplicar liga as legendas do projeto com o estilo sugerido e volta para a Montagem', projetoComLegenda.estilo_legenda);
+    await pagina.click('.aba[data-aba="corretor"]');
+
     console.log('Voltar para a Montagem');
     await pagina.click('.aba[data-aba="montagem"]');
     conferir(await pagina.isVisible('.area') && await pagina.isVisible('#linha') && await pagina.isHidden('#corretor'), 'a montagem volta');

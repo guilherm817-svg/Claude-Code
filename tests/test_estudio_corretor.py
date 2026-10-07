@@ -86,8 +86,11 @@ def test_pedido_vai_com_as_regras_em_cache_e_a_saida_e_conferida(claude):
     assert corpo["output_config"]["effort"] == "high"
     formato = corpo["output_config"]["format"]
     assert formato["type"] == "json_schema" and formato["schema"]["additionalProperties"] is False
-    assert {"problemas", "blocos", "acrescentados_pela_ia", "alertas_de_alcance", "estilo_de_legenda"} <= set(
-        formato["schema"]["required"])
+    assert {"problemas", "blocos", "acrescentados_pela_ia", "alertas_de_alcance", "estilo_de_legenda",
+            "legenda_no_estudio"} <= set(formato["schema"]["required"])
+    # O estilo para as legendas do Estúdio é opcional (null) e usa os mesmos valores dos ajustes de legenda.
+    assert "null" in json.dumps(formato["schema"]["properties"]["legenda_no_estudio"])
+    assert "uma_palavra" in json.dumps(formato["schema"])
     assert "thinking" not in corpo and "temperature" not in corpo
     # As regras vão inteiras no system, com cache: o prefixo é o mesmo em toda correção.
     [regras] = corpo["system"]

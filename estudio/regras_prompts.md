@@ -250,6 +250,17 @@ Cadências (palavras por segundo):
   para fazer as legendas no próprio Estúdio de Reels, que gera legendas automáticas palavra por palavra. Se o
   prompt pedia um estilo de legenda (cor, fonte, posição, palavra por palavra, destaque), descreva esse estilo em
   `estilo_de_legenda`, em português, para o usuário aplicar no Estúdio. Se não pedia estilo nenhum, deixe vazio.
+- Quando houver estilo de legenda, traduza-o também em `legenda_no_estudio`, com os ajustes que o Estúdio tem
+  (com um clique o usuário aplica nas legendas automáticas):
+  - `preset`: `destaque` (palavras brancas com contorno preto e a palavra falada em amarelo; é o "yellow and
+    white word by word"), `uma_palavra` (uma palavra por vez, amarela com contorno preto, grande), `classica`
+    (branca com contorno preto, frases de até duas linhas, sem destaque) ou `caixa` (texto branco sobre caixa
+    preta).
+  - `tamanho`: `P`, `M` ou `G` ("big", "huge", "bold" grande = `G`).
+  - `posicao`: `alto`, `centro` ou `baixo` (abaixo do rosto). Se o prompt pede legenda no centro mas a cena é um
+    close do rosto, ou se ele mesmo pede "no captions on face", use `baixo` e diga isso no `estilo_de_legenda`.
+  - `maiusculas`: verdadeiro se o texto pedido está em caixa alta.
+  Sem legenda pedida, `legenda_no_estudio` é null.
 - "No captions" sozinho é fraco: use a trava multitermo (no subtitles, no captions, no closed captions, no
   on-screen words, no titles, no overlays, no lower thirds, no watermark, no kinetic text). Se a legenda
   aparecer mesmo assim, é sorte da geração: gere de novo uma ou duas vezes.
@@ -378,8 +389,8 @@ resultados de saúde irreais e autoimagem negativa.
   duração). `falas`: uma entrada por fala, na ordem, com `quem` ("Mulher", "Homem", ou vazio se só uma pessoa
   fala no vídeo todo) e `texto` copiado exatamente como está entre as aspas no `prompt`. Bloco sem fala tem
   `falas` vazio. `prompt`: o texto completo para colar no gerador.
-- `acrescentados_pela_ia`, `alertas_de_alcance`, `estilo_de_legenda`: como descrito acima; vazios quando não
-  houver.
+- `acrescentados_pela_ia`, `alertas_de_alcance`, `estilo_de_legenda`, `legenda_no_estudio`: como descrito
+  acima; vazios (ou null) quando não houver.
 
 ## Exemplo de bloco corrigido (Veo, uma pessoa)
 

@@ -80,7 +80,14 @@ def main() -> None:
             return httpx2.Response(401, json={"type": "error", "error": {"type": "authentication_error",
                                                                           "message": "invalid x-api-key"}})
         pensando = 20 if "LENTO" in corpo["messages"][0]["content"] else 0.8
-        return httpx2.Response(200, headers={"content-type": "text/event-stream"}, content=_sse(resposta, pensando))
+        texto = resposta
+        if "LEGENDA-ESTUDIO" in corpo["messages"][0]["content"]:
+            # Prompt que pedia legenda: a resposta traz o estilo para aplicar nas legendas do Estúdio.
+            dados = json.loads(resposta)
+            dados["estilo_de_legenda"] = "Uma palavra por vez, amarela com contorno preto, grande, abaixo do rosto."
+            dados["legenda_no_estudio"] = {"preset": "uma_palavra", "tamanho": "G", "posicao": "baixo", "maiusculas": True}
+            texto = json.dumps(dados, ensure_ascii=False)
+        return httpx2.Response(200, headers={"content-type": "text/event-stream"}, content=_sse(texto, pensando))
 
     corretor._cliente = lambda: anthropic.Anthropic(
         max_retries=0, http_client=anthropic.DefaultHttpxClient(transport=httpx2.MockTransport(responder)))

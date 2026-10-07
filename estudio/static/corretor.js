@@ -64,7 +64,7 @@ export function mostrarAba(aba) {
   if (corretor && estado.opcoes && !$('#corretor-prompt').value) $('#corretor-prompt').focus();
 }
 
-// `aplicarEstiloDeLegenda(texto)`, quando o Estúdio tiver legendas, liga o botão de aplicar o estilo sugerido.
+// `aplicarEstiloDeLegenda(estilo)` recebe os ajustes de legenda sugeridos (preset, tamanho, posição, maiúsculas).
 export async function iniciarCorretor({ aoTrocarDeAba, aplicarEstiloDeLegenda } = {}) {
   estado.aoTrocarDeAba = aoTrocarDeAba;
   estado.aplicarEstiloDeLegenda = aplicarEstiloDeLegenda || null;
@@ -512,7 +512,7 @@ function desenharResultado(r, pedido) {
     partes.push(secao('corretor-legenda', 'Estilo de legenda sugerido', 'legenda',
       'Faça as legendas no Estúdio, não no gerador: legenda gerada pela IA sai com palavras erradas e fora de sincronia com a voz.',
       el('p', { class: 'estilo-legenda' }, r.estilo_de_legenda),
-      aplicar ? el('button', { class: 'botao', type: 'button', onclick: () => aplicar(r.estilo_de_legenda) }, icone('legenda', 15), 'Aplicar nas legendas do Estúdio') : null));
+      aplicar && r.legenda_no_estudio ? el('button', { class: 'botao', type: 'button', onclick: () => aplicar(r.legenda_no_estudio) }, icone('legenda', 15), 'Aplicar nas legendas do Estúdio') : null));
   }
   partes.push(el('p', { class: 'rodape-resultado' }, `Corrigido pelo modelo ${r.modelo}. Confira o resultado antes de gerar: a IA também erra.`));
   return partes;

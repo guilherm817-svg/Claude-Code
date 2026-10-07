@@ -197,6 +197,14 @@ class ItemAcrescentado(BaseModel):
     risco: str
 
 
+class LegendaNoEstudio(BaseModel):
+    """O estilo pedido no prompt, traduzido para os ajustes das legendas do Estúdio."""
+    preset: Literal["destaque", "uma_palavra", "classica", "caixa"]
+    tamanho: Literal["P", "M", "G"]
+    posicao: Literal["alto", "centro", "baixo"]
+    maiusculas: bool
+
+
 class RespostaCorretor(BaseModel):
     recusado: bool = Field(description="Verdadeiro só se o pedido inteiro for perigoso")
     motivo_recusa: str = Field(description="Por que recusou, em português simples; vazio se não recusou")
@@ -207,6 +215,8 @@ class RespostaCorretor(BaseModel):
         description="O que apareceu no prompt sem o usuário pedir; vazio se ele não contou o que pediu")
     alertas_de_alcance: list[str]
     estilo_de_legenda: str = Field(description="Estilo de legenda para fazer no Estúdio; vazio se o prompt não pedia")
+    legenda_no_estudio: LegendaNoEstudio | None = Field(
+        description="O mesmo estilo nos ajustes das legendas do Estúdio; null se o prompt não pedia legenda")
 
 
 # O que a tela recebe: a resposta do Claude mais a conferência feita aqui
