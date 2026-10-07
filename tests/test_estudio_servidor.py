@@ -114,7 +114,7 @@ def test_importacao_que_nao_entra_no_projeto_nao_deixa_arquivos(estudio, clipe, 
     projeto = estudio.criar()
     monkeypatch.setattr(projetos, "ESPERA_TROCA", 0.1)
     _windows_segura(monkeypatch, alvo=lambda destino: destino.name == "projeto.json")
-    with pytest.raises(PermissionError):
+    with pytest.raises(projetos.ErroImportacao, match="antivírus ou o OneDrive"):
         _importar(estudio, projeto.id, clipe)
     assert estudio.abrir(projeto.id).midias == []
     assert list(estudio.pasta_midia(projeto.id).iterdir()) == []

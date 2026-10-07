@@ -350,7 +350,7 @@ def test_ffmpeg_barrado_pelo_antivirus_vira_mensagem_clara(estudio, clipe_curto,
 
 
 def test_api_explica_a_falha_da_importacao(estudio, clipe_curto, monkeypatch):
-    cliente = TestClient(criar_app(estudio), raise_server_exceptions=False)
+    cliente = TestClient(criar_app(estudio), base_url="http://127.0.0.1", raise_server_exceptions=False)
     pid = cliente.post("/api/projetos", json={}, headers=CABECALHO).json()["id"]
     monkeypatch.setattr(projetos, "gerar_tira", _barrado)
     with open(clipe_curto, "rb") as arquivo:
