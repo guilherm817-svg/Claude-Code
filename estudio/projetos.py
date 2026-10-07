@@ -12,17 +12,22 @@ import re
 import secrets
 import shutil
 import threading
+import unicodedata
 from datetime import datetime
 from pathlib import Path
 from typing import BinaryIO, Literal
 
 from pydantic import BaseModel, Field, field_validator
+from pydantic_core import PydanticCustomError
 
 from . import config
 from .midia import ErroMidia, analisar, gerar_tira
 
 PADRAO_ID = r"^[0-9a-f]{12}$"
 DURACAO_MINIMA = 0.1  # s: o menor trecho que a linha do tempo aceita
+MAX_PALAVRAS = 5000  # por clipe: muito mais do que cabe num clipe de IA
+MAX_LETRAS = 80  # por palavra
+TOLERANCIA_LEGENDA = 0.5  # s: o Whisper às vezes marca a última palavra um pouco depois do fim do clipe
 
 Formato = Literal["reels", "feed", "quadrado", "youtube"]
 Enquadramento = Literal["preencher", "desfocado"]
@@ -42,6 +47,25 @@ def novo_id() -> str:
 
 def agora() -> str:
     return datetime.now().isoformat(timespec="seconds")
+
+
+def conferir_legenda(palavras: list["Palavra"], duracao: float) -> list["Palavra"]:
+    """Confere as palavras de uma mídia: em ordem, cada uma com duração e dentro do clipe (um pequeno excesso nas
+    pontas é só limitado)."""
+    if len(palavras) > MAX_PALAVRAS:
+        raise ErroImportacao("A legenda de um clipe tem palavras demais.")
+    conferidas = []
+    for p in palavras:
+        if p.inicio < -TOLERANCIA_LEGENDA or p.fim > duracao + TOLERANCIA_LEGENDA:
+            raise ErroImportacao("Uma palavra da legenda está fora do tempo do clipe.")
+        inicio = round(min(max(p.inicio, 0.0), duracao), 3)
+        fim = round(min(max(p.fim, 0.0), duracao), 3)
+        if fim <= inicio:
+            raise ErroImportacao(f"A palavra “{p.texto}” da legenda termina antes de começar.")
+        if conferidas and inicio < conferidas[-1].inicio:
+            raise ErroImportacao("As palavras da legenda estão fora de ordem.")
+        conferidas.append(Palavra(inicio=inicio, fim=fim, texto=p.texto))
+    return conferidas
 
 
 class Aviso(BaseModel):
@@ -85,6 +109,32 @@ class Item(BaseModel):
     saida: float = Field(gt=0)
 
 
+class Palavra(BaseModel):
+    """Uma palavra da legenda, com o tempo dela em segundos do arquivo da mídia."""
+    inicio: float
+    fim: float
+    texto: str
+
+    @field_validator("texto")
+    @classmethod
+    def _texto(cls, valor: str) -> str:
+        # PydanticCustomError: a mensagem chega à tela sem o "Value error," em inglês na frente.
+        valor = " ".join(unicodedata.normalize("NFC", valor).split())
+        if not valor:
+            raise PydanticCustomError("palavra_vazia", "Uma palavra da legenda está vazia.")
+        if len(valor) > MAX_LETRAS:
+            raise PydanticCustomError("palavra_longa", "Uma palavra da legenda passou de 80 letras.")
+        return valor
+
+
+class EstiloLegenda(BaseModel):
+    preset: Literal["destaque", "uma_palavra", "classica", "caixa"] = "destaque"
+    tamanho: Literal["P", "M", "G"] = "M"
+    posicao: Literal["alto", "centro", "baixo"] = "baixo"
+    maiusculas: bool = True
+    animacao: bool = True
+
+
 class Ajustes(BaseModel):
     """O que a tela pode mudar num projeto."""
     nome: str = Field(min_length=1, max_length=120)
@@ -92,6 +142,12 @@ class Ajustes(BaseModel):
     enquadramento: Enquadramento = "preencher"
     igualar_volume: bool = True
     linha: list[Item] = []
+    legendas_ativas: bool = False
+    idioma_legenda: Literal["auto", "pt", "en", "es"] = "auto"
+    estilo_legenda: EstiloLegenda = EstiloLegenda()
+    # Palavras transcritas de cada mídia. Num salvamento, as mídias que não vierem ficam como estão no servidor:
+    # assim a tela nunca apaga uma transcrição que terminou enquanto ela salvava.
+    legendas: dict[str, list[Palavra]] = {}
 
     @field_validator("nome")
     @classmethod
@@ -204,10 +260,35 @@ class Estudio:
                 entrada = min(max(item.entrada, 0.0), max(midia.duracao - DURACAO_MINIMA, 0.0))
                 saida = min(max(item.saida, entrada + DURACAO_MINIMA), midia.duracao)
                 linha.append(Item(id=item.id, midia_id=midia.id, entrada=round(entrada, 3), saida=round(saida, 3)))
+            legendas = {}
+            for midia_id, palavras in ajustes.legendas.items():
+                midia = projeto.midia(midia_id)
+                if midia is None:
+                    raise ErroImportacao("A legenda cita um clipe que não está no projeto.")
+                legendas[midia_id] = conferir_legenda(palavras, midia.duracao)
             projeto.nome, projeto.formato = ajustes.nome, ajustes.formato
             projeto.enquadramento, projeto.igualar_volume = ajustes.enquadramento, ajustes.igualar_volume
             projeto.linha = linha
+            projeto.legendas_ativas, projeto.idioma_legenda = ajustes.legendas_ativas, ajustes.idioma_legenda
+            projeto.estilo_legenda = ajustes.estilo_legenda
+            projeto.legendas.update(legendas)
             return self.salvar(projeto)
+
+    def gravar_legenda(self, projeto_id: str, midia_id: str, palavras: list[Palavra]) -> bool:
+        """Guarda a transcrição de uma mídia. False se a mídia saiu do projeto enquanto era transcrita."""
+        with self._trava:
+            projeto = self.abrir(projeto_id)
+            midia = projeto.midia(midia_id)
+            if midia is None:
+                return False
+            projeto.legendas[midia_id] = conferir_legenda(palavras, midia.duracao)
+            self.salvar(projeto)
+            return True
+
+    def legendas_gravadas(self, projeto_id: str) -> dict[str, list[Palavra]]:
+        """As legendas como estão gravadas agora, lidas com a trava (nunca no meio de uma gravação)."""
+        with self._trava:
+            return self.abrir(projeto_id).legendas
 
     # Mídia
 
@@ -257,6 +338,7 @@ class Estudio:
                 raise ProjetoNaoEncontrado(midia_id)
             projeto.midias = [m for m in projeto.midias if m.id != midia_id]
             projeto.linha = [i for i in projeto.linha if i.midia_id != midia_id]
+            projeto.legendas.pop(midia_id, None)
             self.salvar(projeto)
         for arquivo in (self.arquivo_midia(projeto_id, midia), self.arquivo_tira(projeto_id, midia_id),
                         self.arquivo_onda(projeto_id, midia_id)):

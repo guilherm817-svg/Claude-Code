@@ -1,0 +1,1915 @@
+{
+ "casos": [
+  {
+   "nome": "destaque: até 3 palavras, quebra no ponto final e emenda as telas",
+   "palavras": [
+    {
+     "inicio": 0.1,
+     "fim": 0.4,
+     "texto": "Isso"
+    },
+    {
+     "inicio": 0.42,
+     "fim": 0.7,
+     "texto": "muda"
+    },
+    {
+     "inicio": 0.72,
+     "fim": 1.1,
+     "texto": "tudo."
+    },
+    {
+     "inicio": 1.3,
+     "fim": 1.6,
+     "texto": "Agora"
+    },
+    {
+     "inicio": 1.62,
+     "fim": 1.9,
+     "texto": "presta"
+    },
+    {
+     "inicio": 1.92,
+     "fim": 2.5,
+     "texto": "atenção"
+    }
+   ],
+   "entrada": 0,
+   "saida": 4,
+   "estilo": {
+    "preset": "destaque",
+    "tamanho": "M",
+    "posicao": "baixo",
+    "maiusculas": true,
+    "animacao": true
+   },
+   "largura": 1080,
+   "altura": 1920,
+   "telas": [
+    {
+     "inicio": 0.1,
+     "fim": 1.3,
+     "palavras": [
+      {
+       "texto": "ISSO",
+       "inicio": 0.1,
+       "fim": 0.4
+      },
+      {
+       "texto": "MUDA",
+       "inicio": 0.42,
+       "fim": 0.7
+      },
+      {
+       "texto": "TUDO.",
+       "inicio": 0.72,
+       "fim": 1.1
+      }
+     ],
+     "linhas": [
+      [
+       0,
+       1
+      ],
+      [
+       2
+      ]
+     ],
+     "destaques": [
+      [
+       0.1,
+       0.42
+      ],
+      [
+       0.42,
+       0.72
+      ],
+      [
+       0.72,
+       1.3
+      ]
+     ]
+    },
+    {
+     "inicio": 1.3,
+     "fim": 3.1,
+     "palavras": [
+      {
+       "texto": "AGORA",
+       "inicio": 1.3,
+       "fim": 1.6
+      },
+      {
+       "texto": "PRESTA",
+       "inicio": 1.62,
+       "fim": 1.9
+      },
+      {
+       "texto": "ATENÇÃO",
+       "inicio": 1.92,
+       "fim": 2.5
+      }
+     ],
+     "linhas": [
+      [
+       0,
+       1
+      ],
+      [
+       2
+      ]
+     ],
+     "destaques": [
+      [
+       1.3,
+       1.62
+      ],
+      [
+       1.62,
+       1.92
+      ],
+      [
+       1.92,
+       3.1
+      ]
+     ]
+    }
+   ],
+   "diagramas": [
+    {
+     "fonte": "Poppins Black",
+     "peso": 900,
+     "em": 88.56,
+     "fs": 156.04,
+     "contorno": 10.63,
+     "escala": 1.0,
+     "linhas": [
+      {
+       "texto": "ISSO MUDA",
+       "palavras": [
+        0,
+        1
+       ],
+       "x": 540.0,
+       "y": 1226.55,
+       "base": 1249.05,
+       "largura": 506.21
+      },
+      {
+       "texto": "TUDO.",
+       "palavras": [
+        2
+       ],
+       "x": 540.0,
+       "y": 1325.74,
+       "base": 1348.23,
+       "largura": 282.06
+      }
+     ],
+     "caixas": []
+    },
+    {
+     "fonte": "Poppins Black",
+     "peso": 900,
+     "em": 88.56,
+     "fs": 156.04,
+     "contorno": 10.63,
+     "escala": 1.0,
+     "linhas": [
+      {
+       "texto": "AGORA PRESTA",
+       "palavras": [
+        0,
+        1
+       ],
+       "x": 540.0,
+       "y": 1226.55,
+       "base": 1249.05,
+       "largura": 692.1
+      },
+      {
+       "texto": "ATENÇÃO",
+       "palavras": [
+        2
+       ],
+       "x": 540.0,
+       "y": 1325.74,
+       "base": 1348.23,
+       "largura": 446.17
+      }
+     ],
+     "caixas": []
+    }
+   ]
+  },
+  {
+   "nome": "pausa longa começa outra tela; vão pequeno emenda, vão grande não",
+   "palavras": [
+    {
+     "inicio": 0.0,
+     "fim": 0.3,
+     "texto": "um"
+    },
+    {
+     "inicio": 1.05,
+     "fim": 1.2,
+     "texto": "dois"
+    },
+    {
+     "inicio": 1.3,
+     "fim": 1.5,
+     "texto": "três"
+    },
+    {
+     "inicio": 3.0,
+     "fim": 3.2,
+     "texto": "quatro"
+    },
+    {
+     "inicio": 3.35,
+     "fim": 3.6,
+     "texto": "cinco"
+    }
+   ],
+   "entrada": 0,
+   "saida": 5,
+   "estilo": {
+    "preset": "destaque",
+    "tamanho": "M",
+    "posicao": "baixo",
+    "maiusculas": true,
+    "animacao": true
+   },
+   "largura": 1080,
+   "altura": 1920,
+   "telas": [
+    {
+     "inicio": 0.0,
+     "fim": 1.05,
+     "palavras": [
+      {
+       "texto": "UM",
+       "inicio": 0.0,
+       "fim": 0.3
+      }
+     ],
+     "linhas": [
+      [
+       0
+      ]
+     ],
+     "destaques": [
+      [
+       0.0,
+       1.05
+      ]
+     ]
+    },
+    {
+     "inicio": 1.05,
+     "fim": 2.1,
+     "palavras": [
+      {
+       "texto": "DOIS",
+       "inicio": 1.05,
+       "fim": 1.2
+      },
+      {
+       "texto": "TRÊS",
+       "inicio": 1.3,
+       "fim": 1.5
+      }
+     ],
+     "linhas": [
+      [
+       0,
+       1
+      ]
+     ],
+     "destaques": [
+      [
+       1.05,
+       1.3
+      ],
+      [
+       1.3,
+       2.1
+      ]
+     ]
+    },
+    {
+     "inicio": 3.0,
+     "fim": 4.2,
+     "palavras": [
+      {
+       "texto": "QUATRO",
+       "inicio": 3.0,
+       "fim": 3.2
+      },
+      {
+       "texto": "CINCO",
+       "inicio": 3.35,
+       "fim": 3.6
+      }
+     ],
+     "linhas": [
+      [
+       0,
+       1
+      ]
+     ],
+     "destaques": [
+      [
+       3.0,
+       3.35
+      ],
+      [
+       3.35,
+       4.2
+      ]
+     ]
+    }
+   ],
+   "diagramas": [
+    {
+     "fonte": "Poppins Black",
+     "peso": 900,
+     "em": 88.56,
+     "fs": 156.04,
+     "contorno": 10.63,
+     "escala": 1.0,
+     "linhas": [
+      {
+       "texto": "UM",
+       "palavras": [
+        0
+       ],
+       "x": 540.0,
+       "y": 1276.14,
+       "base": 1298.64,
+       "largura": 147.9
+      }
+     ],
+     "caixas": []
+    },
+    {
+     "fonte": "Poppins Black",
+     "peso": 900,
+     "em": 88.56,
+     "fs": 156.04,
+     "contorno": 10.63,
+     "escala": 1.0,
+     "linhas": [
+      {
+       "texto": "DOIS TRÊS",
+       "palavras": [
+        0,
+        1
+       ],
+       "x": 540.0,
+       "y": 1276.14,
+       "base": 1298.64,
+       "largura": 452.98
+      }
+     ],
+     "caixas": []
+    },
+    {
+     "fonte": "Poppins Black",
+     "peso": 900,
+     "em": 88.56,
+     "fs": 156.04,
+     "contorno": 10.63,
+     "escala": 1.0,
+     "linhas": [
+      {
+       "texto": "QUATRO CINCO",
+       "palavras": [
+        0,
+        1
+       ],
+       "x": 540.0,
+       "y": 1276.14,
+       "base": 1298.64,
+       "largura": 701.31
+      }
+     ],
+     "caixas": []
+    }
+   ]
+  },
+  {
+   "nome": "só as palavras dentro do corte, no tempo do trecho",
+   "palavras": [
+    {
+     "inicio": 0.2,
+     "fim": 0.55,
+     "texto": "fora"
+    },
+    {
+     "inicio": 0.49,
+     "fim": 0.51,
+     "texto": "raspando"
+    },
+    {
+     "inicio": 0.6,
+     "fim": 0.9,
+     "texto": "dentro"
+    },
+    {
+     "inicio": 1.0,
+     "fim": 1.4,
+     "texto": "também"
+    },
+    {
+     "inicio": 1.99,
+     "fim": 2.4,
+     "texto": "fim"
+    }
+   ],
+   "entrada": 0.5,
+   "saida": 2.0,
+   "estilo": {
+    "preset": "destaque",
+    "tamanho": "M",
+    "posicao": "baixo",
+    "maiusculas": true,
+    "animacao": true
+   },
+   "largura": 1080,
+   "altura": 1920,
+   "telas": [
+    {
+     "inicio": 0.0,
+     "fim": 1.5,
+     "palavras": [
+      {
+       "texto": "FORA",
+       "inicio": 0.0,
+       "fim": 0.05
+      },
+      {
+       "texto": "DENTRO",
+       "inicio": 0.1,
+       "fim": 0.4
+      },
+      {
+       "texto": "TAMBÉM",
+       "inicio": 0.5,
+       "fim": 0.9
+      }
+     ],
+     "linhas": [
+      [
+       0,
+       1
+      ],
+      [
+       2
+      ]
+     ],
+     "destaques": [
+      [
+       0.0,
+       0.1
+      ],
+      [
+       0.1,
+       0.5
+      ],
+      [
+       0.5,
+       1.5
+      ]
+     ]
+    }
+   ],
+   "diagramas": [
+    {
+     "fonte": "Poppins Black",
+     "peso": 900,
+     "em": 88.56,
+     "fs": 156.04,
+     "contorno": 10.63,
+     "escala": 1.0,
+     "linhas": [
+      {
+       "texto": "FORA DENTRO",
+       "palavras": [
+        0,
+        1
+       ],
+       "x": 540.0,
+       "y": 1226.55,
+       "base": 1249.05,
+       "largura": 631.26
+      },
+      {
+       "texto": "TAMBÉM",
+       "palavras": [
+        2
+       ],
+       "x": 540.0,
+       "y": 1325.74,
+       "base": 1348.23,
+       "largura": 401.27
+      }
+     ],
+     "caixas": []
+    }
+   ]
+  },
+  {
+   "nome": "uma palavra por tela, amarela, e palavra comprida reduzida para caber",
+   "palavras": [
+    {
+     "inicio": 0.0,
+     "fim": 0.4,
+     "texto": "Isso"
+    },
+    {
+     "inicio": 0.4,
+     "fim": 1.6,
+     "texto": "inconstitucionalissimamente"
+    },
+    {
+     "inicio": 1.7,
+     "fim": 2.0,
+     "texto": "é"
+    },
+    {
+     "inicio": 2.05,
+     "fim": 2.5,
+     "texto": "real!"
+    }
+   ],
+   "entrada": 0,
+   "saida": 3.0,
+   "estilo": {
+    "preset": "uma_palavra",
+    "tamanho": "G",
+    "posicao": "baixo",
+    "maiusculas": true,
+    "animacao": true
+   },
+   "largura": 1080,
+   "altura": 1920,
+   "telas": [
+    {
+     "inicio": 0.0,
+     "fim": 0.4,
+     "palavras": [
+      {
+       "texto": "ISSO",
+       "inicio": 0.0,
+       "fim": 0.4
+      }
+     ],
+     "linhas": [
+      [
+       0
+      ]
+     ],
+     "destaques": null
+    },
+    {
+     "inicio": 0.4,
+     "fim": 1.7,
+     "palavras": [
+      {
+       "texto": "INCONSTITUCIONALISSIMAMENTE",
+       "inicio": 0.4,
+       "fim": 1.6
+      }
+     ],
+     "linhas": [
+      [
+       0
+      ]
+     ],
+     "destaques": null
+    },
+    {
+     "inicio": 1.7,
+     "fim": 2.05,
+     "palavras": [
+      {
+       "texto": "É",
+       "inicio": 1.7,
+       "fim": 2.0
+      }
+     ],
+     "linhas": [
+      [
+       0
+      ]
+     ],
+     "destaques": null
+    },
+    {
+     "inicio": 2.05,
+     "fim": 3.0,
+     "palavras": [
+      {
+       "texto": "REAL!",
+       "inicio": 2.05,
+       "fim": 2.5
+      }
+     ],
+     "linhas": [
+      [
+       0
+      ]
+     ],
+     "destaques": null
+    }
+   ],
+   "diagramas": [
+    {
+     "fonte": "Poppins Black",
+     "peso": 900,
+     "em": 171.29,
+     "fs": 301.81,
+     "contorno": 17.13,
+     "escala": 1.0,
+     "linhas": [
+      {
+       "texto": "ISSO",
+       "palavras": [
+        0
+       ],
+       "x": 540.0,
+       "y": 1284.5,
+       "base": 1328.01,
+       "largura": 404.24
+      }
+     ],
+     "caixas": []
+    },
+    {
+     "fonte": "Poppins Black",
+     "peso": 900,
+     "em": 51.73,
+     "fs": 91.15,
+     "contorno": 5.17,
+     "escala": 0.302,
+     "linhas": [
+      {
+       "texto": "INCONSTITUCIONALISSIMAMENTE",
+       "palavras": [
+        0
+       ],
+       "x": 540.0,
+       "y": 1272.42,
+       "base": 1285.56,
+       "largura": 895.74
+      }
+     ],
+     "caixas": []
+    },
+    {
+     "fonte": "Poppins Black",
+     "peso": 900,
+     "em": 171.29,
+     "fs": 301.81,
+     "contorno": 17.13,
+     "escala": 1.0,
+     "linhas": [
+      {
+       "texto": "É",
+       "palavras": [
+        0
+       ],
+       "x": 540.0,
+       "y": 1284.5,
+       "base": 1328.01,
+       "largura": 95.24
+      }
+     ],
+     "caixas": []
+    },
+    {
+     "fonte": "Poppins Black",
+     "peso": 900,
+     "em": 171.29,
+     "fs": 301.81,
+     "contorno": 17.13,
+     "escala": 1.0,
+     "linhas": [
+      {
+       "texto": "REAL!",
+       "palavras": [
+        0
+       ],
+       "x": 540.0,
+       "y": 1284.5,
+       "base": 1328.01,
+       "largura": 507.01
+      }
+     ],
+     "caixas": []
+    }
+   ]
+  },
+  {
+   "nome": "clássica sem maiúsculas: até 7 palavras em 2 linhas",
+   "palavras": [
+    {
+     "inicio": 0.0,
+     "fim": 0.2,
+     "texto": "a"
+    },
+    {
+     "inicio": 0.2,
+     "fim": 0.5,
+     "texto": "gente"
+    },
+    {
+     "inicio": 0.5,
+     "fim": 0.8,
+     "texto": "precisa"
+    },
+    {
+     "inicio": 0.8,
+     "fim": 1.0,
+     "texto": "falar"
+    },
+    {
+     "inicio": 1.0,
+     "fim": 1.2,
+     "texto": "sobre"
+    },
+    {
+     "inicio": 1.2,
+     "fim": 1.5,
+     "texto": "isso"
+    },
+    {
+     "inicio": 1.5,
+     "fim": 1.8,
+     "texto": "hoje"
+    },
+    {
+     "inicio": 1.8,
+     "fim": 2.1,
+     "texto": "mesmo"
+    },
+    {
+     "inicio": 2.1,
+     "fim": 2.4,
+     "texto": "agora"
+    }
+   ],
+   "entrada": 0,
+   "saida": 3.0,
+   "estilo": {
+    "preset": "classica",
+    "tamanho": "M",
+    "posicao": "baixo",
+    "maiusculas": false,
+    "animacao": true
+   },
+   "largura": 1080,
+   "altura": 1920,
+   "telas": [
+    {
+     "inicio": 0.0,
+     "fim": 1.8,
+     "palavras": [
+      {
+       "texto": "a",
+       "inicio": 0.0,
+       "fim": 0.2
+      },
+      {
+       "texto": "gente",
+       "inicio": 0.2,
+       "fim": 0.5
+      },
+      {
+       "texto": "precisa",
+       "inicio": 0.5,
+       "fim": 0.8
+      },
+      {
+       "texto": "falar",
+       "inicio": 0.8,
+       "fim": 1.0
+      },
+      {
+       "texto": "sobre",
+       "inicio": 1.0,
+       "fim": 1.2
+      },
+      {
+       "texto": "isso",
+       "inicio": 1.2,
+       "fim": 1.5
+      },
+      {
+       "texto": "hoje",
+       "inicio": 1.5,
+       "fim": 1.8
+      }
+     ],
+     "linhas": [
+      [
+       0,
+       1,
+       2
+      ],
+      [
+       3,
+       4,
+       5,
+       6
+      ]
+     ],
+     "destaques": null
+    },
+    {
+     "inicio": 1.8,
+     "fim": 3.0,
+     "palavras": [
+      {
+       "texto": "mesmo",
+       "inicio": 1.8,
+       "fim": 2.1
+      },
+      {
+       "texto": "agora",
+       "inicio": 2.1,
+       "fim": 2.4
+      }
+     ],
+     "linhas": [
+      [
+       0,
+       1
+      ]
+     ],
+     "destaques": null
+    }
+   ],
+   "diagramas": [
+    {
+     "fonte": "Poppins ExtraBold",
+     "peso": 800,
+     "em": 62.64,
+     "fs": 110.37,
+     "contorno": 5.64,
+     "escala": 1.0,
+     "linhas": [
+      {
+       "texto": "a gente precisa",
+       "palavras": [
+        0,
+        1,
+        2
+       ],
+       "x": 540.0,
+       "y": 1236.57,
+       "base": 1252.48,
+       "largura": 500.31
+      },
+      {
+       "texto": "falar sobre isso hoje",
+       "palavras": [
+        3,
+        4,
+        5,
+        6
+       ],
+       "x": 540.0,
+       "y": 1310.48,
+       "base": 1326.39,
+       "largura": 647.26
+      }
+     ],
+     "caixas": []
+    },
+    {
+     "fonte": "Poppins ExtraBold",
+     "peso": 800,
+     "em": 62.64,
+     "fs": 110.37,
+     "contorno": 5.64,
+     "escala": 1.0,
+     "linhas": [
+      {
+       "texto": "mesmo agora",
+       "palavras": [
+        0,
+        1
+       ],
+       "x": 540.0,
+       "y": 1273.53,
+       "base": 1289.44,
+       "largura": 455.27
+      }
+     ],
+     "caixas": []
+    }
+   ]
+  },
+  {
+   "nome": "caixa no alto, tamanho G, com acentos",
+   "palavras": [
+    {
+     "inicio": 0.0,
+     "fim": 0.3,
+     "texto": "Você"
+    },
+    {
+     "inicio": 0.3,
+     "fim": 0.6,
+     "texto": "não"
+    },
+    {
+     "inicio": 0.6,
+     "fim": 0.9,
+     "texto": "vai"
+    },
+    {
+     "inicio": 0.9,
+     "fim": 1.4,
+     "texto": "acreditar"
+    },
+    {
+     "inicio": 1.5,
+     "fim": 1.9,
+     "texto": "nisso"
+    }
+   ],
+   "entrada": 0,
+   "saida": 2.5,
+   "estilo": {
+    "preset": "caixa",
+    "tamanho": "G",
+    "posicao": "alto",
+    "maiusculas": true,
+    "animacao": true
+   },
+   "largura": 1080,
+   "altura": 1920,
+   "telas": [
+    {
+     "inicio": 0.0,
+     "fim": 1.5,
+     "palavras": [
+      {
+       "texto": "VOCÊ",
+       "inicio": 0.0,
+       "fim": 0.3
+      },
+      {
+       "texto": "NÃO",
+       "inicio": 0.3,
+       "fim": 0.6
+      },
+      {
+       "texto": "VAI",
+       "inicio": 0.6,
+       "fim": 0.9
+      },
+      {
+       "texto": "ACREDITAR",
+       "inicio": 0.9,
+       "fim": 1.4
+      }
+     ],
+     "linhas": [
+      [
+       0,
+       1,
+       2
+      ],
+      [
+       3
+      ]
+     ],
+     "destaques": null
+    },
+    {
+     "inicio": 1.5,
+     "fim": 2.5,
+     "palavras": [
+      {
+       "texto": "NISSO",
+       "inicio": 1.5,
+       "fim": 1.9
+      }
+     ],
+     "linhas": [
+      [
+       0
+      ]
+     ],
+     "destaques": null
+    }
+   ],
+   "diagramas": [
+    {
+     "fonte": "Poppins ExtraBold",
+     "peso": 800,
+     "em": 84.33,
+     "fs": 148.58,
+     "contorno": 0.0,
+     "escala": 1.0,
+     "linhas": [
+      {
+       "texto": "VOCÊ NÃO VAI",
+       "palavras": [
+        0,
+        1,
+        2
+       ],
+       "x": 540.0,
+       "y": 488.78,
+       "base": 510.19,
+       "largura": 618.87
+      },
+      {
+       "texto": "ACREDITAR",
+       "palavras": [
+        3
+       ],
+       "x": 540.0,
+       "y": 603.46,
+       "base": 624.88,
+       "largura": 487.83
+      }
+     ],
+     "caixas": [
+      {
+       "x": 540.0,
+       "y": 480.26,
+       "largura": 679.59,
+       "altura": 114.68,
+       "raio": 18.55
+      },
+      {
+       "x": 540.0,
+       "y": 594.94,
+       "largura": 548.54,
+       "altura": 114.68,
+       "raio": 18.55
+      }
+     ]
+    },
+    {
+     "fonte": "Poppins ExtraBold",
+     "peso": 800,
+     "em": 84.33,
+     "fs": 148.58,
+     "contorno": 0.0,
+     "escala": 1.0,
+     "linhas": [
+      {
+       "texto": "NISSO",
+       "palavras": [
+        0
+       ],
+       "x": 540.0,
+       "y": 546.12,
+       "base": 567.54,
+       "largura": 261.41
+      }
+     ],
+     "caixas": [
+      {
+       "x": 540.0,
+       "y": 537.6,
+       "largura": 322.13,
+       "altura": 114.68,
+       "raio": 18.55
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "nome": "quadrado: o bloco sobe para não cair na faixa de baixo",
+   "palavras": [
+    {
+     "inicio": 0.0,
+     "fim": 0.5,
+     "texto": "Atenção"
+    }
+   ],
+   "entrada": 0,
+   "saida": 1.0,
+   "estilo": {
+    "preset": "uma_palavra",
+    "tamanho": "G",
+    "posicao": "baixo",
+    "maiusculas": true,
+    "animacao": true
+   },
+   "largura": 1080,
+   "altura": 1080,
+   "telas": [
+    {
+     "inicio": 0.0,
+     "fim": 1.0,
+     "palavras": [
+      {
+       "texto": "ATENÇÃO",
+       "inicio": 0.0,
+       "fim": 0.5
+      }
+     ],
+     "linhas": [
+      [
+       0
+      ]
+     ],
+     "destaques": null
+    }
+   ],
+   "diagramas": [
+    {
+     "fonte": "Poppins Black",
+     "peso": 900,
+     "em": 171.29,
+     "fs": 301.81,
+     "contorno": 17.13,
+     "escala": 1.0,
+     "linhas": [
+      {
+       "texto": "ATENÇÃO",
+       "palavras": [
+        0
+       ],
+       "x": 540.0,
+       "y": 701.4,
+       "base": 744.91,
+       "largura": 862.95
+      }
+     ],
+     "caixas": []
+    }
+   ]
+  },
+  {
+   "nome": "YouTube: o tamanho segue o lado menor; tamanho P no centro, sem animação",
+   "palavras": [
+    {
+     "inicio": 0.0,
+     "fim": 0.3,
+     "texto": "Oi!"
+    },
+    {
+     "inicio": 0.35,
+     "fim": 0.6,
+     "texto": "Tudo"
+    },
+    {
+     "inicio": 0.6,
+     "fim": 0.9,
+     "texto": "bem?"
+    },
+    {
+     "inicio": 1.0,
+     "fim": 1.3,
+     "texto": "Sim."
+    }
+   ],
+   "entrada": 0,
+   "saida": 2.0,
+   "estilo": {
+    "preset": "destaque",
+    "tamanho": "P",
+    "posicao": "centro",
+    "maiusculas": true,
+    "animacao": false
+   },
+   "largura": 1920,
+   "altura": 1080,
+   "telas": [
+    {
+     "inicio": 0.0,
+     "fim": 0.35,
+     "palavras": [
+      {
+       "texto": "OI!",
+       "inicio": 0.0,
+       "fim": 0.3
+      }
+     ],
+     "linhas": [
+      [
+       0
+      ]
+     ],
+     "destaques": [
+      [
+       0.0,
+       0.35
+      ]
+     ]
+    },
+    {
+     "inicio": 0.35,
+     "fim": 1.0,
+     "palavras": [
+      {
+       "texto": "TUDO",
+       "inicio": 0.35,
+       "fim": 0.6
+      },
+      {
+       "texto": "BEM?",
+       "inicio": 0.6,
+       "fim": 0.9
+      }
+     ],
+     "linhas": [
+      [
+       0,
+       1
+      ]
+     ],
+     "destaques": [
+      [
+       0.35,
+       0.6
+      ],
+      [
+       0.6,
+       1.0
+      ]
+     ]
+    },
+    {
+     "inicio": 1.0,
+     "fim": 1.9,
+     "palavras": [
+      {
+       "texto": "SIM.",
+       "inicio": 1.0,
+       "fim": 1.3
+      }
+     ],
+     "linhas": [
+      [
+       0
+      ]
+     ],
+     "destaques": [
+      [
+       1.0,
+       1.9
+      ]
+     ]
+    }
+   ],
+   "diagramas": [
+    {
+     "fonte": "Poppins Black",
+     "peso": 900,
+     "em": 72.62,
+     "fs": 127.96,
+     "contorno": 8.71,
+     "escala": 1.0,
+     "linhas": [
+      {
+       "texto": "OI!",
+       "palavras": [
+        0
+       ],
+       "x": 960.0,
+       "y": 547.33,
+       "base": 565.78,
+       "largura": 113.65
+      }
+     ],
+     "caixas": []
+    },
+    {
+     "fonte": "Poppins Black",
+     "peso": 900,
+     "em": 72.62,
+     "fs": 127.96,
+     "contorno": 8.71,
+     "escala": 1.0,
+     "linhas": [
+      {
+       "texto": "TUDO BEM?",
+       "palavras": [
+        0,
+        1
+       ],
+       "x": 960.0,
+       "y": 547.33,
+       "base": 565.78,
+       "largura": 418.65
+      }
+     ],
+     "caixas": []
+    },
+    {
+     "fonte": "Poppins Black",
+     "peso": 900,
+     "em": 72.62,
+     "fs": 127.96,
+     "contorno": 8.71,
+     "escala": 1.0,
+     "linhas": [
+      {
+       "texto": "SIM.",
+       "palavras": [
+        0
+       ],
+       "x": 960.0,
+       "y": 547.33,
+       "base": 565.78,
+       "largura": 161.0
+      }
+     ],
+     "caixas": []
+    }
+   ]
+  },
+  {
+   "nome": "palavra longa sozinha numa linha e a próxima embaixo",
+   "palavras": [
+    {
+     "inicio": 0.0,
+     "fim": 0.8,
+     "texto": "extraordinariamente"
+    },
+    {
+     "inicio": 0.8,
+     "fim": 1.0,
+     "texto": "bom"
+    },
+    {
+     "inicio": 1.0,
+     "fim": 1.2,
+     "texto": "demais"
+    }
+   ],
+   "entrada": 0,
+   "saida": 2.0,
+   "estilo": {
+    "preset": "destaque",
+    "tamanho": "M",
+    "posicao": "baixo",
+    "maiusculas": true,
+    "animacao": true
+   },
+   "largura": 1080,
+   "altura": 1350,
+   "telas": [
+    {
+     "inicio": 0.0,
+     "fim": 1.8,
+     "palavras": [
+      {
+       "texto": "EXTRAORDINARIAMENTE",
+       "inicio": 0.0,
+       "fim": 0.8
+      },
+      {
+       "texto": "BOM",
+       "inicio": 0.8,
+       "fim": 1.0
+      },
+      {
+       "texto": "DEMAIS",
+       "inicio": 1.0,
+       "fim": 1.2
+      }
+     ],
+     "linhas": [
+      [
+       0
+      ],
+      [
+       1,
+       2
+      ]
+     ],
+     "destaques": [
+      [
+       0.0,
+       0.8
+      ],
+      [
+       0.8,
+       1.0
+      ],
+      [
+       1.0,
+       1.8
+      ]
+     ]
+    }
+   ],
+   "diagramas": [
+    {
+     "fonte": "Poppins Black",
+     "peso": 900,
+     "em": 70.23,
+     "fs": 123.74,
+     "contorno": 8.43,
+     "escala": 0.793,
+     "linhas": [
+      {
+       "texto": "EXTRAORDINARIAMENTE",
+       "palavras": [
+        0
+       ],
+       "x": 540.0,
+       "y": 858.77,
+       "base": 876.6,
+       "largura": 890.28
+      },
+      {
+       "texto": "BOM DEMAIS",
+       "palavras": [
+        1,
+        2
+       ],
+       "x": 540.0,
+       "y": 937.42,
+       "base": 955.26,
+       "largura": 460.91
+      }
+     ],
+     "caixas": []
+    }
+   ]
+  },
+  {
+   "nome": "palavras coladas no mesmo instante e fim do trecho cortando a tela",
+   "palavras": [
+    {
+     "inicio": 0.0,
+     "fim": 0.25,
+     "texto": "Ó"
+    },
+    {
+     "inicio": 0.25,
+     "fim": 0.3,
+     "texto": "ß"
+    },
+    {
+     "inicio": 0.25,
+     "fim": 0.5,
+     "texto": "straße"
+    },
+    {
+     "inicio": 0.5,
+     "fim": 0.9,
+     "texto": "“olha”"
+    }
+   ],
+   "entrada": 0,
+   "saida": 0.8,
+   "estilo": {
+    "preset": "destaque",
+    "tamanho": "M",
+    "posicao": "baixo",
+    "maiusculas": true,
+    "animacao": true
+   },
+   "largura": 1080,
+   "altura": 1920,
+   "telas": [
+    {
+     "inicio": 0.0,
+     "fim": 0.5,
+     "palavras": [
+      {
+       "texto": "Ó",
+       "inicio": 0.0,
+       "fim": 0.25
+      },
+      {
+       "texto": "SS",
+       "inicio": 0.25,
+       "fim": 0.3
+      },
+      {
+       "texto": "STRASSE",
+       "inicio": 0.25,
+       "fim": 0.5
+      }
+     ],
+     "linhas": [
+      [
+       0,
+       1,
+       2
+      ]
+     ],
+     "destaques": [
+      [
+       0.0,
+       0.25
+      ],
+      [
+       0.25,
+       0.25
+      ],
+      [
+       0.25,
+       0.5
+      ]
+     ]
+    },
+    {
+     "inicio": 0.5,
+     "fim": 0.8,
+     "palavras": [
+      {
+       "texto": "“OLHA”",
+       "inicio": 0.5,
+       "fim": 0.8
+      }
+     ],
+     "linhas": [
+      [
+       0
+      ]
+     ],
+     "destaques": [
+      [
+       0.5,
+       0.8
+      ]
+     ]
+    }
+   ],
+   "diagramas": [
+    {
+     "fonte": "Poppins Black",
+     "peso": 900,
+     "em": 88.56,
+     "fs": 156.04,
+     "contorno": 10.63,
+     "escala": 1.0,
+     "linhas": [
+      {
+       "texto": "Ó SS STRASSE",
+       "palavras": [
+        0,
+        1,
+        2
+       ],
+       "x": 540.0,
+       "y": 1276.14,
+       "base": 1298.64,
+       "largura": 608.23
+      }
+     ],
+     "caixas": []
+    },
+    {
+     "fonte": "Poppins Black",
+     "peso": 900,
+     "em": 88.56,
+     "fs": 156.04,
+     "contorno": 10.63,
+     "escala": 1.0,
+     "linhas": [
+      {
+       "texto": "“OLHA”",
+       "palavras": [
+        0
+       ],
+       "x": 540.0,
+       "y": 1276.14,
+       "base": 1298.64,
+       "largura": 364.69
+      }
+     ],
+     "caixas": []
+    }
+   ]
+  },
+  {
+   "nome": "sem palavras",
+   "palavras": [],
+   "entrada": 0,
+   "saida": 2,
+   "estilo": {
+    "preset": "destaque",
+    "tamanho": "M",
+    "posicao": "baixo",
+    "maiusculas": true,
+    "animacao": true
+   },
+   "largura": 1080,
+   "altura": 1920,
+   "telas": [],
+   "diagramas": []
+  }
+ ],
+ "realinhar": [
+  {
+   "nome": "mesmo número de palavras: troca o texto e mantém o tempo",
+   "palavras": [
+    {
+     "inicio": 0.1,
+     "fim": 0.4,
+     "texto": "voce"
+    },
+    {
+     "inicio": 0.4,
+     "fim": 0.8,
+     "texto": "sabia"
+    }
+   ],
+   "texto": "Você sabia?",
+   "intervalo": null,
+   "esperado": [
+    {
+     "inicio": 0.1,
+     "fim": 0.4,
+     "texto": "Você"
+    },
+    {
+     "inicio": 0.4,
+     "fim": 0.8,
+     "texto": "sabia?"
+    }
+   ]
+  },
+  {
+   "nome": "uma palavra virou duas: só ela é redistribuída",
+   "palavras": [
+    {
+     "inicio": 0.0,
+     "fim": 0.3,
+     "texto": "isso"
+    },
+    {
+     "inicio": 0.3,
+     "fim": 0.8,
+     "texto": "dacasa"
+    },
+    {
+     "inicio": 0.8,
+     "fim": 1.0,
+     "texto": "hoje"
+    }
+   ],
+   "texto": "isso da casa hoje",
+   "intervalo": null,
+   "esperado": [
+    {
+     "inicio": 0.0,
+     "fim": 0.3,
+     "texto": "isso"
+    },
+    {
+     "inicio": 0.3,
+     "fim": 0.467,
+     "texto": "da"
+    },
+    {
+     "inicio": 0.467,
+     "fim": 0.8,
+     "texto": "casa"
+    },
+    {
+     "inicio": 0.8,
+     "fim": 1.0,
+     "texto": "hoje"
+    }
+   ]
+  },
+  {
+   "nome": "palavra a mais no meio sem trocar as outras: a anterior cede o tempo",
+   "palavras": [
+    {
+     "inicio": 0.0,
+     "fim": 0.3,
+     "texto": "a"
+    },
+    {
+     "inicio": 0.3,
+     "fim": 0.6,
+     "texto": "b"
+    },
+    {
+     "inicio": 0.6,
+     "fim": 0.9,
+     "texto": "c"
+    }
+   ],
+   "texto": "a b novo c",
+   "intervalo": null,
+   "esperado": [
+    {
+     "inicio": 0.0,
+     "fim": 0.3,
+     "texto": "a"
+    },
+    {
+     "inicio": 0.3,
+     "fim": 0.36,
+     "texto": "b"
+    },
+    {
+     "inicio": 0.36,
+     "fim": 0.6,
+     "texto": "novo"
+    },
+    {
+     "inicio": 0.6,
+     "fim": 0.9,
+     "texto": "c"
+    }
+   ]
+  },
+  {
+   "nome": "palavra a mais no começo",
+   "palavras": [
+    {
+     "inicio": 0.2,
+     "fim": 0.5,
+     "texto": "b"
+    },
+    {
+     "inicio": 0.5,
+     "fim": 0.9,
+     "texto": "c"
+    }
+   ],
+   "texto": "aa b c",
+   "intervalo": null,
+   "esperado": [
+    {
+     "inicio": 0.2,
+     "fim": 0.4,
+     "texto": "aa"
+    },
+    {
+     "inicio": 0.4,
+     "fim": 0.5,
+     "texto": "b"
+    },
+    {
+     "inicio": 0.5,
+     "fim": 0.9,
+     "texto": "c"
+    }
+   ]
+  },
+  {
+   "nome": "palavra a menos: as outras mantêm o tempo",
+   "palavras": [
+    {
+     "inicio": 0.0,
+     "fim": 0.3,
+     "texto": "é"
+    },
+    {
+     "inicio": 0.3,
+     "fim": 0.5,
+     "texto": "tipo"
+    },
+    {
+     "inicio": 0.5,
+     "fim": 0.9,
+     "texto": "assim"
+    }
+   ],
+   "texto": "é assim",
+   "intervalo": null,
+   "esperado": [
+    {
+     "inicio": 0.0,
+     "fim": 0.3,
+     "texto": "é"
+    },
+    {
+     "inicio": 0.5,
+     "fim": 0.9,
+     "texto": "assim"
+    }
+   ]
+  },
+  {
+   "nome": "tudo diferente: redistribui do começo da primeira ao fim da última",
+   "palavras": [
+    {
+     "inicio": 1.0,
+     "fim": 1.5,
+     "texto": "um"
+    },
+    {
+     "inicio": 1.5,
+     "fim": 2.0,
+     "texto": "dois"
+    }
+   ],
+   "texto": "três quatro cinco",
+   "intervalo": null,
+   "esperado": [
+    {
+     "inicio": 1.0,
+     "fim": 1.267,
+     "texto": "três"
+    },
+    {
+     "inicio": 1.267,
+     "fim": 1.667,
+     "texto": "quatro"
+    },
+    {
+     "inicio": 1.667,
+     "fim": 2.0,
+     "texto": "cinco"
+    }
+   ]
+  },
+  {
+   "nome": "texto vazio apaga as palavras",
+   "palavras": [
+    {
+     "inicio": 0.0,
+     "fim": 0.3,
+     "texto": "x"
+    }
+   ],
+   "texto": "   ",
+   "intervalo": null,
+   "esperado": []
+  },
+  {
+   "nome": "sem palavras antes: usa o intervalo do corte",
+   "palavras": [],
+   "texto": "olá mundo",
+   "intervalo": [
+    0.5,
+    1.5
+   ],
+   "esperado": [
+    {
+     "inicio": 0.5,
+     "fim": 0.875,
+     "texto": "olá"
+    },
+    {
+     "inicio": 0.875,
+     "fim": 1.5,
+     "texto": "mundo"
+    }
+   ]
+  },
+  {
+   "nome": "acentos decompostos viram compostos",
+   "palavras": [
+    {
+     "inicio": 0.0,
+     "fim": 0.5,
+     "texto": "voce"
+    }
+   ],
+   "texto": "você",
+   "intervalo": null,
+   "esperado": [
+    {
+     "inicio": 0.0,
+     "fim": 0.5,
+     "texto": "você"
+    }
+   ]
+  }
+ ],
+ "pop": [
+  [
+   -0.1,
+   0.75
+  ],
+  [
+   0.0,
+   0.75
+  ],
+  [
+   0.03,
+   0.86
+  ],
+  [
+   0.09,
+   1.08
+  ],
+  [
+   0.12,
+   1.04
+  ],
+  [
+   0.15,
+   1.0
+  ],
+  [
+   0.5,
+   1.0
+  ]
+ ]
+}

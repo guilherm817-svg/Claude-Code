@@ -128,6 +128,8 @@ Um editor para montar Reels a partir de clipes gerados por IA (Flow/Veo, Kling, 
   primeira palavra), para um clipe emendar direto no outro, sem tempo morto;
 - **avisa quando a fala encosta na borda** do clipe, sinal de palavra cortada na geração;
 - **iguala o volume** de todos os clipes no padrão das redes (−14 LUFS);
+- **escreve as legendas sozinho**, palavra por palavra, com a palavra falada em amarelo (ou em outros três
+  estilos), transcrevendo a fala no seu computador;
 - **exporta em 1080×1920** (ou 4:5, 1:1 e 16:9), cortando as sobras ou com fundo desfocado quando um clipe tem
   outra proporção.
 
@@ -149,6 +151,15 @@ Na primeira vez ele instala o que precisa, inclusive o ffmpeg, e depois abre no 
 
 O botão de celular, embaixo da prévia, mostra onde a interface do Reels (curtir, comentar, nome e legenda) cobre
 o vídeo. Tudo é salvo sozinho, e **Ctrl+Z** desfaz qualquer edição.
+
+**Legendas automáticas:** com nenhum clipe selecionado, ligue **Legendas automáticas** no painel da direita. O
+Estúdio transcreve a fala de cada clipe (e dos que você importar depois) com o Whisper, no seu computador. Na
+primeira vez ele baixa o modelo de transcrição (cerca de 1,6 GB, o mesmo do Analisador): só essa vez precisa de
+internet e pode levar alguns minutos. Escolha o estilo (Destaque, Uma palavra, Clássica ou Caixa), o tamanho e a
+posição; **Abaixo do rosto** é o padrão, porque em close o centro da tela é o rosto. Para corrigir uma palavra,
+clique no clipe e edite o texto em **Legenda deste clipe**: cada palavra continua no tempo dela. A legenda sai no
+vídeo exportado igual à da prévia, com a mesma fonte (Poppins). Não peça legenda ao gerador de vídeo: ele escreve
+letras tortas.
 
 | Atalho | O que faz |
 |---|---|
@@ -191,8 +202,12 @@ estudio/                   Estúdio de Reels
   midia.py                 ffmpeg: sondar o vídeo, achar a fala, medir o volume, miniaturas e forma de onda
   projetos.py              projetos em pastas/JSON: mídia importada e linha do tempo
   exportar.py              renderiza cada trecho e emenda tudo sem recodificar o vídeo
-  servidor.py              API local (FastAPI) e a tela
+  legendas.py              legendas: palavras em telas, posição no quadro e o .ass que o libass queima no vídeo
+  transcricao.py           Whisper local com o tempo de cada palavra e a fila de transcrição em segundo plano
+  servidor.py              API local (FastAPI) e a tela; rotas_legendas.py tem a parte das legendas
   static/                  a tela (JavaScript puro, sem build): linha do tempo, prévia e exportação
+  static/legendas.js       o mesmo algoritmo do legendas.py, para a prévia (tests/casos_legendas.json confere)
+  static/fontes/           Poppins (licença OFL): a mesma fonte na prévia e na exportação
 player/analytics/          servidor de analytics do player (biblioteca padrão + SQLite) e painel de retenção
 ```
 
@@ -200,4 +215,6 @@ player/analytics/          servidor de analytics do player (biblioteca padrão +
 pip install -r requirements.txt pytest
 python -m pytest
 node tests/e2e_estudio.cjs   # Estúdio num Chromium de verdade (precisa do playwright)
+node tests/e2e_estudio_legendas.cjs   # legendas na tela, com um Whisper falso (tests/servidor_teste_estudio.py)
+node tests/legendas_js.test.cjs       # o algoritmo das legendas em JavaScript (o pytest também roda este)
 ```

@@ -44,6 +44,35 @@ export function desenharOnda(ctx, onda, entrada, pxPorSegundo, largura, y, altur
   }
 }
 
+const ALTURA_FAIXA = 13;
+
+// Faixa fina no pé das miniaturas com o texto de cada tela de legenda, no tempo dela (0 = começo do corte).
+function desenharFaixaDeLegendas(ctx, telas, pxPorSegundo, largura) {
+  const y = ALTURA_TIRA - ALTURA_FAIXA;
+  ctx.save();
+  ctx.font = '600 9.5px system-ui, sans-serif';
+  ctx.textBaseline = 'middle';
+  for (const tela of telas) {
+    const x = tela.inicio * pxPorSegundo;
+    const w = Math.min(largura, tela.fim * pxPorSegundo) - x;
+    if (w < 2) continue;
+    ctx.fillStyle = 'rgba(8, 10, 16, 0.8)';
+    ctx.fillRect(x, y, w - 1, ALTURA_FAIXA);
+    ctx.fillStyle = '#fde047';
+    ctx.fillRect(x, y, 2, ALTURA_FAIXA);
+    if (w > 14) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(x + 4, y, w - 7, ALTURA_FAIXA);
+      ctx.clip();
+      ctx.fillStyle = '#fff';
+      ctx.fillText(tela.texto, x + 5, y + ALTURA_FAIXA / 2 + 0.5);
+      ctx.restore();
+    }
+  }
+  ctx.restore();
+}
+
 export class LinhaDoTempo {
   constructor(raiz, opcoes) {
     this.op = opcoes;
@@ -214,7 +243,9 @@ export class LinhaDoTempo {
 
     const imagem = this.op.imagem(midia.id);
     const onda = this.op.onda(midia.id);
-    const chave = [midia.id, item.entrada, item.saida, this.zoom, imagem?.complete && imagem.naturalWidth, !!onda].join('|');
+    const telas = this.op.legendasDo?.(segmento) || null;
+    const chave = [midia.id, item.entrada, item.saida, this.zoom, imagem?.complete && imagem.naturalWidth, !!onda,
+      telas ? telas.map((t) => `${t.inicio}-${t.fim}:${t.texto}`).join('|') : ''].join('|');
     if (chave === registro.chave) return;
     registro.chave = chave;
     const densidade = Math.min(window.devicePixelRatio || 1, 2);
@@ -228,6 +259,7 @@ export class LinhaDoTempo {
     ctx.fillStyle = '#151a26';
     ctx.fillRect(0, ALTURA_TIRA, largura, ALTURA_ONDA);
     desenharOnda(ctx, onda, item.entrada, this.zoom, largura, ALTURA_TIRA, ALTURA_ONDA, '#5eead4');
+    if (telas) desenharFaixaDeLegendas(ctx, telas, this.zoom, largura);
   }
 
   // Arrastar uma borda corta o clipe. Os clipes seguintes andam junto (não fica buraco).
