@@ -22,8 +22,9 @@ from .projetos import Estudio, Item, Projeto, apagar_arquivos, novo_id, trocar_a
 
 PASTA_FONTES = Path(__file__).parent / "static" / "fontes"
 
-VERSAO_RENDER = 2  # mude quando a receita dos trechos mudar, para não reaproveitar trechos antigos
+VERSAO_RENDER = 3  # mude quando a receita dos trechos mudar, para não reaproveitar trechos antigos
 FADE_EMENDA = 0.012  # s de fade em cada ponta do áudio, para a emenda não estalar
+LER_DO_COMECO = 2.0  # s: trecho com a entrada antes disto é lido desde o começo do arquivo (ver comando_trecho)
 
 # Taxas de quadros padrão. O vídeo final usa a que mais aparece entre os clipes.
 TAXAS = [(24000 / 1001, "24000/1001"), (24.0, "24"), (25.0, "25"), (30000 / 1001, "30000/1001"), (30.0, "30"),
@@ -93,9 +94,14 @@ def filtro_cor(cor: Cor) -> str:
     sem recodificar declara as cores do primeiro trecho para o vídeo inteiro."""
     if cor.hdr:
         if tem_tone_mapping():
+            # Há HDR com só a transferência marcada: sem a matriz ou as primárias, o zscale não tem de onde converter
+            # ("no path between colorspaces") e a exportação inteira falha. O que falta vale BT.2020, o do HDR.
+            faltando = [p for p, falta in (("color_primaries=bt2020", not cor.primarias),
+                                           ("colorspace=bt2020nc", not cor.matriz)) if falta]
+            marcar = f"setparams={':'.join(faltando)}," if faltando else ""
             # O branco de referência do HDR (203 nits, BT.2408) vira o branco do SDR: o mobius mantém o que fica
             # abaixo dele (pele, roupa, parede) e só comprime os brilhos acima, sem escurecer o vídeo todo.
-            return ("zscale=t=linear:npl=203,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=mobius:desat=0,"
+            return (f"{marcar}zscale=t=linear:npl=203,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=mobius:desat=0,"
                     "zscale=t=bt709:m=bt709:r=tv,format=yuv420p,")
         # Sem eles, ao menos a matriz e a faixa ficam certas (as cores ficam um pouco lavadas).
         return "scale=in_color_matrix=bt2020:out_color_matrix=bt709:out_range=tv,"
@@ -106,8 +112,9 @@ def filtro_cor(cor: Cor) -> str:
 
 
 def filtro_video(largura: int, altura: int, fps: str, quadros: int, enquadramento: str,
-                 legenda: str | None = None, cor: Cor | None = None) -> str:
-    """legenda: caminho do .ass relativo à pasta onde o ffmpeg roda (a de cache do projeto)."""
+                 legenda: str | None = None, cor: Cor | None = None, corte: float = 0.0) -> str:
+    """legenda: caminho do .ass relativo à pasta onde o ffmpeg roda (a de cache do projeto). corte: segundos do
+    começo do que foi lido que ficam fora do trecho (a entrada, quando o arquivo é lido desde o começo)."""
     if enquadramento == "desfocado":
         # Fundo: o próprio vídeo ampliado e desfocado (reduzido antes, para o desfoque sair barato).
         pl, pa = _par(largura // 8), _par(altura // 8)
@@ -119,23 +126,26 @@ def filtro_video(largura: int, altura: int, fps: str, quadros: int, enquadrament
     else:
         corpo = (f"scale={largura}:{altura}:force_original_aspect_ratio=increase:flags=lanczos,"
                  f"crop={largura}:{altura},")
-    # Sem setpts=PTS-STARTPTS: o -ss já deixa a linha do tempo do arquivo começando em 0 na entrada, igual para o
-    # vídeo e o áudio. Zerar cada um pelo seu primeiro quadro perderia o desencontro entre eles (áudio que começa
-    # depois do vídeo) e adiantaria o vídeo em até um quadro quando a entrada cai entre dois quadros. O fps com
-    # start_time=0 repete o primeiro quadro se o vídeo começar um pouco depois do 0.
+    # Sem setpts=PTS-STARTPTS: o -ss (ou o corte, que desconta a mesma constante dos dois) já deixa a linha do tempo
+    # do arquivo começando em 0 na entrada, igual para o vídeo e o áudio. Zerar cada um pelo seu primeiro quadro
+    # perderia o desencontro entre eles (áudio que começa depois do vídeo) e adiantaria o vídeo em até um quadro
+    # quando a entrada cai entre dois quadros. O fps com start_time=0 repete o primeiro quadro se o vídeo começar um
+    # pouco depois do 0.
     # tpad + trim garantem exatamente `quadros` quadros, mesmo que o clipe acabe um quadro antes. Nada de setpts
     # depois do fps: ele apaga a taxa de quadros e o ffmpeg cai nos 25 quadros/s padrão, descartando quadros.
     # A legenda entra por último, já no tamanho final. Caminhos relativos e simples: no Windows, o C:\ de um
     # caminho completo quebraria o filtro.
     texto = f",ass=filename={legenda}:fontsdir=fontes" if legenda else ""
-    return (f"[0:v]{filtro_cor(cor or Cor())}{corpo}setsar=1,fps={fps}:start_time=0,"
+    inicio = f"trim=start={corte:.6f},setpts=PTS-{corte:.6f}/TB," if corte else ""
+    return (f"[0:v]{inicio}{filtro_cor(cor or Cor())}{corpo}setsar=1,fps={fps}:start_time=0,"
             f"setparams=range=tv:color_primaries=bt709:color_trc=bt709:colorspace=bt709,format=yuv420p,"
             f"tpad=stop_mode=clone:stop_duration=1,trim=end_frame={quadros}{texto}[v]")
 
 
-def filtro_audio(indice: int, duracao: float, ganho_db: float, faixa: int = 0) -> str:
+def filtro_audio(indice: int, duracao: float, ganho_db: float, faixa: int = 0, corte: float = 0.0) -> str:
     # O aresample com first_pts=0 completa com silêncio o começo, se o áudio começar depois do vídeo.
-    return (f"[{indice}:a:{faixa}]aresample=48000:async=1:first_pts=0,"
+    inicio = f"atrim=start={corte:.6f},asetpts=PTS-{corte:.6f}/TB," if corte else ""
+    return (f"[{indice}:a:{faixa}]{inicio}aresample=48000:async=1:first_pts=0,"
             f"aformat=sample_fmts=fltp:channel_layouts=stereo,"
             f"volume={ganho_db:.2f}dB,apad,atrim=end={duracao:.6f},"
             f"afade=t=in:d={FADE_EMENDA},afade=t=out:st={max(0.0, duracao - FADE_EMENDA):.6f}:d={FADE_EMENDA}[a]")
@@ -145,15 +155,23 @@ def comando_trecho(trecho: Trecho, largura: int, altura: int, fps: str, fps_valo
                    saida: Path, legenda: str | None = None) -> list[str]:
     quadros = contar_quadros(trecho.duracao, fps_valor)
     duracao = quadros / fps_valor
-    leitura = f"{duracao + 0.5:.3f}"  # lê um pouco a mais; o corte exato é feito pelos filtros
-    args = ["-y", "-ss", f"{trecho.entrada:.3f}", "-t", leitura, "-i", str(trecho.arquivo)]
+    # O -ss põe todos os streams no quadro-chave do vídeo: se a entrada cai antes do primeiro quadro do vídeo (MP4 em
+    # que o vídeo entra depois do áudio), o som de antes dele nunca é lido e o trecho começa mudo, cortando a primeira
+    # sílaba. Perto do começo, o arquivo é lido desde o início, sem -ss nenhum (até o -ss 0 busca), e cortado nos
+    # filtros; mais adiante, o -ss evita decodificar o vídeo todo até a entrada.
+    if trecho.entrada < LER_DO_COMECO:
+        busca, corte = [], trecho.entrada
+    else:
+        busca, corte = ["-ss", f"{trecho.entrada:.3f}"], 0.0
+    leitura = f"{corte + duracao + 0.5:.3f}"  # lê um pouco a mais; o corte exato é feito pelos filtros
+    args = ["-y", *busca, "-t", leitura, "-i", str(trecho.arquivo)]
     indice_audio = 0
     if not trecho.tem_audio:
         args += ["-f", "lavfi", "-t", leitura, "-i", "anullsrc=r=48000:cl=stereo"]
         indice_audio = 1
-    grafo = (filtro_video(largura, altura, fps, quadros, enquadramento, legenda, trecho.cor) + ";"
+    grafo = (filtro_video(largura, altura, fps, quadros, enquadramento, legenda, trecho.cor, corte) + ";"
              + filtro_audio(indice_audio, duracao, trecho.ganho_db if trecho.tem_audio else 0.0,
-                            trecho.faixa_audio if trecho.tem_audio else 0))
+                            trecho.faixa_audio if trecho.tem_audio else 0, corte if trecho.tem_audio else 0.0))
     return args + [
         "-filter_complex", grafo, "-map", "[v]", "-map", "[a]",
         "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-profile:v", "high", "-pix_fmt", "yuv420p",
